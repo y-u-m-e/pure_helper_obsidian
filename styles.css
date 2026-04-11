@@ -405,3 +405,118 @@
   padding: 6px 10px;
   cursor: pointer;
 }
+
+.pure-goal-maker {
+  margin-top: 18px;
+}
+
+.pure-goal-maker h3 {
+  margin: 0;
+}
+
+.pure-goal-maker-workspace {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.pure-goal-maker-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  padding: 10px;
+}
+
+.pure-goal-maker-card h4 {
+  margin: 0 0 8px;
+}
+
+.pure-goal-maker-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 8px 0 4px;
+}
+
+.pure-goal-maker-input {
+  width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.pure-goal-maker-notes {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.pure-goal-linkage {
+  margin-top: 10px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.pure-goal-linkage h5 {
+  margin: 0 0 6px;
+}
+
+.pure-goal-linkage p {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.pure-goal-maker-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pure-goal-maker-actions button {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.pure-goal-maker-primary {
+  border-color: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border) 50%);
+}
+
+.pure-goal-maker-danger {
+  border-color: color-mix(in srgb, #ff6f6f 60%, var(--background-modifier-border) 40%);
+}
+
+.pure-goal-issue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.pure-goal-issue-table th,
+.pure-goal-issue-table td {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.pure-goal-issue-table th {
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.pure-goal-issue-table button {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+}

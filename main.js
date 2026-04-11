@@ -384,6 +384,8 @@ class PureTrackerFlowView extends ItemView {
       statusFilter: "ALL",
       goalSearch: "",
       includeCompleted: true,
+      editorGoalId: "",
+      editorDraft: null,
     };
     this.modalEl = null;
   }
@@ -520,6 +522,8 @@ class PureTrackerFlowView extends ItemView {
       nextGoal ? `${nextGoal.goalId || "?"} ${nextGoal.goal || ""}`.trim() : "All complete",
     );
 
+    this.renderGoalMaker(filteredGoals);
+
     const board = this.contentEl.createDiv({ cls: "pure-progress-board" });
     if (orderedPhases.length === 0) {
       board.createEl("p", {
@@ -636,6 +640,173 @@ class PureTrackerFlowView extends ItemView {
       onChange(checkbox.checked);
     });
     wrap.createEl("span", { text: label });
+  }
+
+  /**
+   * Renders Jira-inspired goal editor and issue list.
+   *
+   * @param {any[]} goals
+   */
+  renderGoalMaker(goals) {
+    const section = this.contentEl.createDiv({ cls: "pure-goal-maker" });
+    section.createEl("h3", { text: "Goal Maker" });
+    section.createEl("p", {
+      cls: "pure-progress-lane-meta",
+      text: "Create/edit goals, manage dependency links, and track dependents in one place.",
+    });
+
+    const workspace = section.createDiv({ cls: "pure-goal-maker-workspace" });
+    const formPane = workspace.createDiv({ cls: "pure-goal-maker-form" });
+    const listPane = workspace.createDiv({ cls: "pure-goal-maker-list" });
+
+    const draft = this.ensureEditorDraft(goals);
+    this.renderGoalEditorForm(formPane, draft, goals);
+    this.renderGoalIssueList(listPane, goals);
+  }
+
+  /**
+   * Ensures there is an active editor draft.
+   *
+   * @param {any[]} goals
+   * @returns {any}
+   */
+  ensureEditorDraft(goals) {
+    if (this.viewState.editorDraft && this.viewState.editorGoalId) {
+      return this.viewState.editorDraft;
+    }
+    const firstGoal = goals && goals.length > 0 ? goals[0] : null;
+    if (firstGoal) {
+      this.viewState.editorGoalId = firstGoal.goalId || "";
+      this.viewState.editorDraft = this.goalToDraft(firstGoal);
+      return this.viewState.editorDraft;
+    }
+    this.viewState.editorGoalId = "";
+    this.viewState.editorDraft = this.createEmptyDraft();
+    return this.viewState.editorDraft;
+  }
+
+  /**
+   * Renders goal form fields and actions.
+   *
+   * @param {HTMLElement} parent
+   * @param {any} draft
+   * @param {any[]} goals
+   */
+  renderGoalEditorForm(parent, draft, goals) {
+    const form = parent.createDiv({ cls: "pure-goal-maker-card" });
+    form.createEl("h4", {
+      text: this.viewState.editorGoalId ? `Edit Goal ${this.viewState.editorGoalId}` : "Create Goal",
+    });
+
+    const fields = [
+      ["Goal ID", "goalId", "text"],
+      ["Phase", "phase", "text"],
+      ["Category", "category", "text"],
+      ["Goal", "goal", "text"],
+      ["Metric", "metric", "text"],
+      ["Dependencies (comma-separated goal IDs)", "dependenciesRaw", "text"],
+    ];
+
+    for (const field of fields) {
+      const label = form.createEl("label", { text: field[0] });
+      label.addClass("pure-goal-maker-label");
+      const input = form.createEl("input", {
+        type: field[2],
+        value: String(draft[field[1]] || ""),
+      });
+      input.addClass("pure-goal-maker-input");
+      input.addEventListener("input", () => {
+        draft[field[1]] = input.value || "";
+      });
+    }
+
+    const statusLabel = form.createEl("label", { text: "Status" });
+    statusLabel.addClass("pure-goal-maker-label");
+    const statusSelect = form.createEl("select");
+    statusSelect.addClass("pure-goal-maker-input");
+    ["Not Started", "In Progress", "Completed"].forEach((value) => {
+      const option = statusSelect.createEl("option", { value: value, text: value });
+      if (this.formatStatus(draft.status) === value) {
+        option.selected = true;
+      }
+    });
+    statusSelect.addEventListener("change", () => {
+      draft.status = statusSelect.value;
+    });
+
+    const notesLabel = form.createEl("label", { text: "Notes" });
+    notesLabel.addClass("pure-goal-maker-label");
+    const notesArea = form.createEl("textarea", { text: String(draft.notes || "") });
+    notesArea.addClass("pure-goal-maker-input");
+    notesArea.addClass("pure-goal-maker-notes");
+    notesArea.addEventListener("input", () => {
+      draft.notes = notesArea.value || "";
+    });
+
+    const linkage = form.createDiv({ cls: "pure-goal-linkage" });
+    linkage.createEl("h5", { text: "Linkage" });
+    const dependencyIds = this.parseDependenciesRaw(draft.dependenciesRaw || "");
+    const dependents = this.findDependents(draft.goalId, goals);
+    linkage.createEl("p", { text: `Depends on: ${dependencyIds.length ? dependencyIds.join(", ") : "None"}` });
+    linkage.createEl("p", { text: `Dependents: ${dependents.length ? dependents.join(", ") : "None"}` });
+
+    const actions = form.createDiv({ cls: "pure-goal-maker-actions" });
+    const saveButton = actions.createEl("button", { text: "Save Goal" });
+    saveButton.addClass("pure-goal-maker-primary");
+    saveButton.addEventListener("click", async () => {
+      await this.saveGoalFromDraft(draft);
+      await this.renderGraph();
+    });
+
+    const newButton = actions.createEl("button", { text: "New Goal" });
+    newButton.addEventListener("click", async () => {
+      this.viewState.editorGoalId = "";
+      this.viewState.editorDraft = this.createEmptyDraft();
+      await this.renderGraph();
+    });
+
+    if (this.viewState.editorGoalId) {
+      const deleteButton = actions.createEl("button", { text: "Delete Goal" });
+      deleteButton.addClass("pure-goal-maker-danger");
+      deleteButton.addEventListener("click", async () => {
+        await this.deleteGoalById(this.viewState.editorGoalId);
+        this.viewState.editorGoalId = "";
+        this.viewState.editorDraft = this.createEmptyDraft();
+        await this.renderGraph();
+      });
+    }
+  }
+
+  /**
+   * Renders issue-style goal list with edit actions.
+   *
+   * @param {HTMLElement} parent
+   * @param {any[]} goals
+   */
+  renderGoalIssueList(parent, goals) {
+    const card = parent.createDiv({ cls: "pure-goal-maker-card" });
+    card.createEl("h4", { text: "Goal Issues" });
+    const table = card.createEl("table", { cls: "pure-goal-issue-table" });
+    const thead = table.createEl("thead");
+    const headRow = thead.createEl("tr");
+    ["Key", "Summary", "Status", "Links", "Action"].forEach((label) => {
+      headRow.createEl("th", { text: label });
+    });
+    const tbody = table.createEl("tbody");
+    for (const goal of goals) {
+      const row = tbody.createEl("tr");
+      row.createEl("td", { text: goal.goalId || "-" });
+      row.createEl("td", { text: goal.goal || "-" });
+      row.createEl("td", { text: this.formatStatus(goal.status) });
+      row.createEl("td", { text: String(this.getGoalDependencies(goal).length) });
+      const actionCell = row.createEl("td");
+      const editButton = actionCell.createEl("button", { text: "Edit" });
+      editButton.addEventListener("click", async () => {
+        this.viewState.editorGoalId = goal.goalId || "";
+        this.viewState.editorDraft = this.goalToDraft(goal);
+        await this.renderGraph();
+      });
+    }
   }
 
   /**
@@ -952,6 +1123,156 @@ class PureTrackerFlowView extends ItemView {
       `Updated dependencies for goal ${goalId || "unknown"} (${dependencyIds.length}).`,
     );
     new Notice("Goal dependencies saved.");
+  }
+
+  /**
+   * Builds empty editor draft.
+   *
+   * @returns {any}
+   */
+  createEmptyDraft() {
+    return {
+      goalId: "",
+      phase: "",
+      category: "",
+      goal: "",
+      metric: "",
+      status: "Not Started",
+      notes: "",
+      dependenciesRaw: "",
+    };
+  }
+
+  /**
+   * Converts goal object to editable draft shape.
+   *
+   * @param {any} goal
+   * @returns {any}
+   */
+  goalToDraft(goal) {
+    return {
+      goalId: String((goal && goal.goalId) || ""),
+      phase: String((goal && goal.phase) || ""),
+      category: String((goal && goal.category) || ""),
+      goal: String((goal && goal.goal) || ""),
+      metric: String((goal && goal.metric) || ""),
+      status: String((goal && goal.status) || "Not Started"),
+      notes: String((goal && goal.notes) || ""),
+      dependenciesRaw: this.getGoalDependencies(goal).join(", "),
+    };
+  }
+
+  /**
+   * Parses comma-separated dependency IDs.
+   *
+   * @param {string} raw
+   * @returns {string[]}
+   */
+  parseDependenciesRaw(raw) {
+    return String(raw || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  }
+
+  /**
+   * Finds dependent goal IDs for a given goal.
+   *
+   * @param {string} goalId
+   * @param {any[]} goals
+   * @returns {string[]}
+   */
+  findDependents(goalId, goals) {
+    const target = this.goalIdKey(goalId);
+    if (!target) {
+      return [];
+    }
+    const dependents = [];
+    for (const goal of goals || []) {
+      const dependencies = this.getGoalDependencies(goal).map((value) => this.goalIdKey(value));
+      if (dependencies.indexOf(target) >= 0) {
+        dependents.push(goal.goalId || "");
+      }
+    }
+    return dependents;
+  }
+
+  /**
+   * Saves goal maker draft into goals payload.
+   *
+   * @param {any} draft
+   * @returns {Promise<void>}
+   */
+  async saveGoalFromDraft(draft) {
+    const goalId = String(draft.goalId || "").trim();
+    if (!goalId) {
+      new Notice("Goal ID is required.");
+      return;
+    }
+    const payload = await this.plugin.readJson("goals.json", { source: "", items: [] });
+    const key = this.goalIdKey(goalId);
+    const nextItem = {
+      goalId: goalId,
+      phase: String(draft.phase || "").trim(),
+      category: String(draft.category || "").trim(),
+      goal: String(draft.goal || "").trim(),
+      metric: String(draft.metric || "").trim(),
+      status: String(draft.status || "Not Started").trim(),
+      notes: String(draft.notes || "").trim(),
+      dependencies: this.parseDependenciesRaw(draft.dependenciesRaw || ""),
+    };
+
+    let updated = false;
+    for (let i = 0; i < (payload.items || []).length; i++) {
+      const current = payload.items[i];
+      if (this.goalIdKey(current && current.goalId) !== key) {
+        continue;
+      }
+      payload.items[i] = nextItem;
+      updated = true;
+      break;
+    }
+    if (!updated) {
+      payload.items = payload.items || [];
+      payload.items.push(nextItem);
+    }
+
+    payload.updatedAt = nowIso();
+    await this.plugin.writeJson("goals.json", payload);
+    await this.plugin.syncGoalsMarkdown(payload.items || []);
+    await this.plugin.appendAudit(
+      `${updated ? "Updated" : "Created"} goal ${goalId} via Goal Maker.`,
+    );
+    this.viewState.editorGoalId = goalId;
+    this.viewState.editorDraft = this.goalToDraft(nextItem);
+    new Notice(`${updated ? "Updated" : "Created"} goal ${goalId}.`);
+  }
+
+  /**
+   * Deletes one goal by ID.
+   *
+   * @param {string} goalId
+   * @returns {Promise<void>}
+   */
+  async deleteGoalById(goalId) {
+    const key = this.goalIdKey(goalId);
+    if (!key) {
+      return;
+    }
+    const payload = await this.plugin.readJson("goals.json", { source: "", items: [] });
+    const beforeCount = (payload.items || []).length;
+    payload.items = (payload.items || []).filter(
+      (item) => this.goalIdKey(item && item.goalId) !== key,
+    );
+    if (payload.items.length === beforeCount) {
+      new Notice(`Goal not found: ${goalId}`);
+      return;
+    }
+    payload.updatedAt = nowIso();
+    await this.plugin.writeJson("goals.json", payload);
+    await this.plugin.syncGoalsMarkdown(payload.items || []);
+    await this.plugin.appendAudit(`Deleted goal ${goalId} via Goal Maker.`);
+    new Notice(`Deleted goal ${goalId}.`);
   }
 
   /**
