@@ -1,7 +1,7 @@
 {
   "id": "pure-tracker",
   "name": "Pure Tracker",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "minAppVersion": "1.0.0",
   "description": "Obsidian-native 1 Def Pure tracker with goals import and auto exclusion lists.",
   "author": "Karl + Cursor",
