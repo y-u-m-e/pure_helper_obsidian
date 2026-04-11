@@ -352,6 +352,12 @@
   position: absolute;
   width: 260px;
   z-index: 2;
+  cursor: grab;
+}
+
+.pure-goal-flow-node.is-dragging {
+  cursor: grabbing;
+  opacity: 0.95;
 }
 
 .pure-blocker-collapse {
@@ -406,6 +412,13 @@
   cursor: pointer;
 }
 
+.pure-goal-modal-toggle {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .pure-goal-maker {
   margin-top: 18px;
 }
@@ -453,6 +466,13 @@
 .pure-goal-maker-notes {
   min-height: 86px;
   resize: vertical;
+}
+
+.pure-goal-maker-toggle {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .pure-goal-linkage {

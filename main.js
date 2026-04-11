@@ -453,6 +453,10 @@ class PureTrackerFlowView extends ItemView {
     const goals = await this.plugin.readJson("goals.json", { items: [] });
     const quests = await this.plugin.readJson("derived_not_completable_quests.json", { items: [] });
     const diaries = await this.plugin.readJson("derived_not_completable_diaries.json", { items: [] });
+    const mapLayout = await this.plugin.readJson("goal_map_layout.json", {
+      updatedAt: "",
+      positions: {},
+    });
 
     const goalItems = goals.items || [];
     const filteredGoals = this.filterGoals(goalItems);
@@ -546,7 +550,7 @@ class PureTrackerFlowView extends ItemView {
       }
     }
 
-    this.renderGoalDependencyMap(filteredGoals);
+    this.renderGoalDependencyMap(filteredGoals, mapLayout);
 
     const blockerSection = this.contentEl.createDiv({ cls: "pure-blocker-section" });
     blockerSection.createEl("h3", { text: "Not Doable Lists" });
@@ -734,6 +738,14 @@ class PureTrackerFlowView extends ItemView {
       draft.status = statusSelect.value;
     });
 
+    const showInMapWrap = form.createDiv({ cls: "pure-goal-maker-toggle" });
+    const showInMapCheckbox = showInMapWrap.createEl("input", { type: "checkbox" });
+    showInMapCheckbox.checked = draft.showInMap !== false;
+    showInMapWrap.createEl("span", { text: "Show in dependency map" });
+    showInMapCheckbox.addEventListener("change", () => {
+      draft.showInMap = showInMapCheckbox.checked;
+    });
+
     const notesLabel = form.createEl("label", { text: "Notes" });
     notesLabel.addClass("pure-goal-maker-label");
     const notesArea = form.createEl("textarea", { text: String(draft.notes || "") });
@@ -789,7 +801,7 @@ class PureTrackerFlowView extends ItemView {
     const table = card.createEl("table", { cls: "pure-goal-issue-table" });
     const thead = table.createEl("thead");
     const headRow = thead.createEl("tr");
-    ["Key", "Summary", "Status", "Links", "Action"].forEach((label) => {
+    ["Key", "Summary", "Status", "Links", "Map", "Action"].forEach((label) => {
       headRow.createEl("th", { text: label });
     });
     const tbody = table.createEl("tbody");
@@ -799,6 +811,7 @@ class PureTrackerFlowView extends ItemView {
       row.createEl("td", { text: goal.goal || "-" });
       row.createEl("td", { text: this.formatStatus(goal.status) });
       row.createEl("td", { text: String(this.getGoalDependencies(goal).length) });
+      row.createEl("td", { text: this.isGoalShownInMap(goal) ? "Yes" : "No" });
       const actionCell = row.createEl("td");
       const editButton = actionCell.createEl("button", { text: "Edit" });
       editButton.addEventListener("click", async () => {
@@ -864,19 +877,21 @@ class PureTrackerFlowView extends ItemView {
    * Renders a goal-only dependency flowchart.
    *
    * @param {any[]} goals
+   * @param {any} mapLayout
    */
-  renderGoalDependencyMap(goals) {
+  renderGoalDependencyMap(goals, mapLayout) {
     const section = this.contentEl.createDiv({ cls: "pure-goal-flow-section" });
     section.createEl("h3", { text: "Goal Dependency Map" });
     section.createEl("p", {
       cls: "pure-progress-lane-meta",
-      text: "Goal cards are linked by dependency goal IDs. Edit dependencies in a goal card modal.",
+      text: "Goal cards are linked by dependency goal IDs. Drag cards to reposition and save layout automatically.",
     });
 
-    if (!goals || goals.length === 0) {
+    const visibleGoals = (goals || []).filter((goal) => this.isGoalShownInMap(goal));
+    if (!visibleGoals || visibleGoals.length === 0) {
       section.createEl("p", {
         cls: "pure-flow-empty",
-        text: "No goals available for dependency mapping.",
+        text: "No goals available for dependency mapping. Enable 'Show in map' in Goal Maker.",
       });
       return;
     }
@@ -889,8 +904,8 @@ class PureTrackerFlowView extends ItemView {
     const marginX = 40;
     const marginY = 60;
 
-    const phaseOrder = this.getPhaseOrder(goals);
-    const grouped = this.groupGoalsByPhase(goals);
+    const phaseOrder = this.getPhaseOrder(visibleGoals);
+    const grouped = this.groupGoalsByPhase(visibleGoals);
     let maxLaneCount = 1;
     for (const phase of phaseOrder) {
       const laneItems = grouped.get(phase) || [];
@@ -908,10 +923,7 @@ class PureTrackerFlowView extends ItemView {
     svg.setAttribute("preserveAspectRatio", "none");
     canvas.appendChild(svg);
 
-    const goalMap = new Map();
-    for (const goal of goals) {
-      goalMap.set(this.goalIdKey(goal.goalId), goal);
-    }
+    const positions = (mapLayout && mapLayout.positions) || {};
 
     const nodePositionByGoalId = new Map();
 
@@ -929,20 +941,23 @@ class PureTrackerFlowView extends ItemView {
         const goal = laneItems[rowIndex];
         const y = marginY + rowIndex * nodeGap;
         const key = this.goalIdKey(goal.goalId);
-        nodePositionByGoalId.set(key, { x: x, y: y });
+        const stored = positions[key];
+        const useX = stored && typeof stored.x === "number" ? stored.x : x;
+        const useY = stored && typeof stored.y === "number" ? stored.y : y;
+        nodePositionByGoalId.set(key, { x: useX, y: useY });
         const card = this.createGoalCard(
           canvas,
           goal,
           false,
         );
         card.addClass("pure-goal-flow-node");
-        card.style.left = `${x}px`;
-        card.style.top = `${y}px`;
-        goalMap.set(key, goal);
+        card.style.left = `${useX}px`;
+        card.style.top = `${useY}px`;
+        this.attachGoalDrag(card, key, canvas, width, height);
       }
     }
 
-    for (const goal of goals) {
+    for (const goal of visibleGoals) {
       const toKey = this.goalIdKey(goal.goalId);
       const toPoint = nodePositionByGoalId.get(toKey);
       if (!toPoint) {
@@ -1037,6 +1052,10 @@ class PureTrackerFlowView extends ItemView {
       placeholder: "Example: 12.0, 24.0",
     });
     dependencyInput.addClass("pure-goal-modal-input");
+    const showInMapWrap = modal.createDiv({ cls: "pure-goal-modal-toggle" });
+    const showInMapCheckbox = showInMapWrap.createEl("input", { type: "checkbox" });
+    showInMapCheckbox.checked = this.isGoalShownInMap(goal);
+    showInMapWrap.createEl("span", { text: "Show this goal in dependency map" });
     const saveDependenciesButton = modal.createEl("button", { text: "Save Dependencies" });
     saveDependenciesButton.addClass("pure-goal-modal-save");
     saveDependenciesButton.addEventListener("click", async () => {
@@ -1044,7 +1063,7 @@ class PureTrackerFlowView extends ItemView {
         .split(",")
         .map((value) => value.trim())
         .filter((value) => value.length > 0);
-      await this.saveGoalDependencies(goal.goalId, dependencyIds);
+      await this.saveGoalDependencies(goal.goalId, dependencyIds, showInMapCheckbox.checked);
       this.closeGoalModal();
       await this.renderGraph();
     });
@@ -1098,9 +1117,10 @@ class PureTrackerFlowView extends ItemView {
    *
    * @param {string} goalId
    * @param {string[]} dependencyIds
+   * @param {boolean} showInMap
    * @returns {Promise<void>}
    */
-  async saveGoalDependencies(goalId, dependencyIds) {
+  async saveGoalDependencies(goalId, dependencyIds, showInMap) {
     const payload = await this.plugin.readJson("goals.json", { source: "", items: [] });
     const targetKey = this.goalIdKey(goalId);
     let updated = false;
@@ -1109,6 +1129,7 @@ class PureTrackerFlowView extends ItemView {
         continue;
       }
       item.dependencies = dependencyIds.slice();
+      item.showInMap = showInMap !== false;
       updated = true;
       break;
     }
@@ -1140,6 +1161,7 @@ class PureTrackerFlowView extends ItemView {
       status: "Not Started",
       notes: "",
       dependenciesRaw: "",
+      showInMap: true,
     };
   }
 
@@ -1159,6 +1181,7 @@ class PureTrackerFlowView extends ItemView {
       status: String((goal && goal.status) || "Not Started"),
       notes: String((goal && goal.notes) || ""),
       dependenciesRaw: this.getGoalDependencies(goal).join(", "),
+      showInMap: this.isGoalShownInMap(goal),
     };
   }
 
@@ -1220,6 +1243,7 @@ class PureTrackerFlowView extends ItemView {
       status: String(draft.status || "Not Started").trim(),
       notes: String(draft.notes || "").trim(),
       dependencies: this.parseDependenciesRaw(draft.dependenciesRaw || ""),
+      showInMap: draft.showInMap !== false,
     };
 
     let updated = false;
@@ -1307,6 +1331,81 @@ class PureTrackerFlowView extends ItemView {
   }
 
   /**
+   * Enables drag movement for a goal node and persists position.
+   *
+   * @param {HTMLElement} card
+   * @param {string} goalKey
+   * @param {HTMLElement} canvas
+   * @param {number} canvasWidth
+   * @param {number} canvasHeight
+   */
+  attachGoalDrag(card, goalKey, canvas, canvasWidth, canvasHeight) {
+    card.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      let dragging = true;
+      const rect = card.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      card.classList.add("is-dragging");
+      event.preventDefault();
+
+      const onMouseMove = (moveEvent) => {
+        if (!dragging) {
+          return;
+        }
+        const canvasRect = canvas.getBoundingClientRect();
+        let x = moveEvent.clientX - canvasRect.left - offsetX;
+        let y = moveEvent.clientY - canvasRect.top - offsetY;
+        x = Math.max(0, Math.min(canvasWidth - 280, x));
+        y = Math.max(40, Math.min(canvasHeight - 100, y));
+        card.style.left = `${x}px`;
+        card.style.top = `${y}px`;
+      };
+
+      const onMouseUp = async () => {
+        if (!dragging) {
+          return;
+        }
+        dragging = false;
+        card.classList.remove("is-dragging");
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        const x = Number.parseFloat(card.style.left.replace("px", "")) || 0;
+        const y = Number.parseFloat(card.style.top.replace("px", "")) || 0;
+        await this.persistGoalCardPosition(goalKey, x, y);
+        await this.renderGraph();
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    });
+  }
+
+  /**
+   * Saves one dragged goal card position to layout JSON.
+   *
+   * @param {string} goalKey
+   * @param {number} x
+   * @param {number} y
+   * @returns {Promise<void>}
+   */
+  async persistGoalCardPosition(goalKey, x, y) {
+    if (!goalKey) {
+      return;
+    }
+    const payload = await this.plugin.readJson("goal_map_layout.json", {
+      updatedAt: "",
+      positions: {},
+    });
+    payload.positions = payload.positions || {};
+    payload.positions[goalKey] = { x: x, y: y };
+    payload.updatedAt = nowIso();
+    await this.plugin.writeJson("goal_map_layout.json", payload);
+  }
+
+  /**
    * Normalizes goal ID to stable comparison key.
    *
    * @param {any} goalId
@@ -1316,6 +1415,26 @@ class PureTrackerFlowView extends ItemView {
     return String(goalId || "")
       .trim()
       .toLowerCase();
+  }
+
+  /**
+   * Determines whether a goal should render in the map.
+   *
+   * @param {any} goal
+   * @returns {boolean}
+   */
+  isGoalShownInMap(goal) {
+    if (!goal) {
+      return false;
+    }
+    if (goal.showInMap === undefined || goal.showInMap === null) {
+      return true;
+    }
+    if (typeof goal.showInMap === "boolean") {
+      return goal.showInMap;
+    }
+    const normalized = String(goal.showInMap).trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
   }
 
   /**
@@ -1806,6 +1925,17 @@ class PureTrackerPlugin extends Plugin {
         2,
       ),
     );
+    await this.ensureFile(
+      this.dataPath("goal_map_layout.json"),
+      JSON.stringify(
+        {
+          updatedAt: "",
+          positions: {},
+        },
+        null,
+        2,
+      ),
+    );
     await this.ensureFile(this.dataPath("audit_log.md"), "# Pure Tracker Audit Log\n\n");
 
     await this.ensureFile(
@@ -2156,13 +2286,13 @@ class PureTrackerPlugin extends Plugin {
       "",
       "## Goals (goals.json)",
       "",
-      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies |",
-      "|---|---|---|---|---|---|---|---|",
+      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies | Show In Map |",
+      "|---|---|---|---|---|---|---|---|---|",
     ];
 
     for (const item of goals.items || []) {
       lines.push(
-        `| ${this.toTableCell(item.goalId)} | ${this.toTableCell(item.phase)} | ${this.toTableCell(item.category)} | ${this.toTableCell(item.goal)} | ${this.toTableCell(item.metric)} | ${this.toTableCell(item.status)} | ${this.toTableCell(item.notes)} | ${this.toTableCell(this.getGoalDependencies(item).join(", "))} |`,
+        `| ${this.toTableCell(item.goalId)} | ${this.toTableCell(item.phase)} | ${this.toTableCell(item.category)} | ${this.toTableCell(item.goal)} | ${this.toTableCell(item.metric)} | ${this.toTableCell(item.status)} | ${this.toTableCell(item.notes)} | ${this.toTableCell(this.getGoalDependencies(item).join(", "))} | ${this.toTableCell(this.isGoalShownInMap(item) ? "true" : "false")} |`,
       );
     }
 
@@ -2233,6 +2363,10 @@ class PureTrackerPlugin extends Plugin {
         .split(",")
         .map((value) => value.trim())
         .filter((value) => value.length > 0),
+      showInMap: (() => {
+        const raw = String(cells[8] || "true").trim().toLowerCase();
+        return raw === "true" || raw === "1" || raw === "yes";
+      })(),
     }));
 
     const questItems = questRows.map((cells) => ({
@@ -2298,12 +2432,12 @@ class PureTrackerPlugin extends Plugin {
       "",
       "[[OSRS/Pure Tracker/README|Pure Tracker Index]]",
       "",
-      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies |",
-      "|---|---|---|---|---|---|---|---|",
+      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies | Show In Map |",
+      "|---|---|---|---|---|---|---|---|---|",
     ];
     for (const goal of items) {
       lines.push(
-        `| ${goal.goalId || ""} | ${goal.phase || ""} | ${goal.category || ""} | ${goal.goal || ""} | ${goal.metric || ""} | ${goal.status || ""} | ${goal.notes || ""} | ${this.getGoalDependencies(goal).join(", ")} |`,
+        `| ${goal.goalId || ""} | ${goal.phase || ""} | ${goal.category || ""} | ${goal.goal || ""} | ${goal.metric || ""} | ${goal.status || ""} | ${goal.notes || ""} | ${this.getGoalDependencies(goal).join(", ")} | ${this.isGoalShownInMap(goal) ? "true" : "false"} |`,
       );
     }
     lines.push("", "#pure-tracker #goals");
