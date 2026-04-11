@@ -91,9 +91,9 @@
 
 .pure-progress-board {
   margin-top: 14px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .pure-progress-lane {
@@ -101,6 +101,50 @@
   border-radius: 10px;
   background: var(--background-secondary);
   padding: 10px;
+}
+
+.pure-progress-lane-collapse {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  padding: 8px 10px;
+}
+
+.pure-progress-lane-collapse > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.pure-progress-lane-collapse > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pure-progress-lane-collapse > summary::before {
+  content: "▸ ";
+  color: var(--text-muted);
+}
+
+.pure-progress-lane-collapse[open] > summary::before {
+  content: "▾ ";
+}
+
+.pure-progress-status-columns {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.pure-progress-status-column {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.pure-progress-status-column h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
 }
 
 .pure-progress-lane h3 {
@@ -461,6 +505,32 @@
 
 .pure-goal-maker-card h4 {
   margin: 0 0 8px;
+}
+
+.pure-goal-maker-collapse {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  padding: 8px 10px;
+}
+
+.pure-goal-maker-collapse > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.pure-goal-maker-collapse > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pure-goal-maker-collapse > summary::before {
+  content: "▸ ";
+  color: var(--text-muted);
+}
+
+.pure-goal-maker-collapse[open] > summary::before {
+  content: "▾ ";
 }
 
 .pure-goal-maker-label {

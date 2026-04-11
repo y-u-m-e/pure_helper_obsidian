@@ -536,16 +536,34 @@ class PureTrackerFlowView extends ItemView {
       });
     } else {
       for (const phase of orderedPhases) {
-        const lane = board.createDiv({ cls: "pure-progress-lane" });
-        lane.createEl("h3", { text: phase || "Unspecified Phase" });
         const laneItems = groupedGoals.get(phase) || [];
-        lane.createEl("p", {
-          cls: "pure-progress-lane-meta",
-          text: `${laneItems.length} goals`,
+        const laneDetails = board.createEl("details", { cls: "pure-progress-lane-collapse" });
+        laneDetails.open = !this.isPhaseCollapsedByDefault(phase);
+        laneDetails.createEl("summary", {
+          text: `${phase || "Unspecified Phase"} (${laneItems.length})`,
         });
-        const cards = lane.createDiv({ cls: "pure-progress-cards" });
-        for (const goal of laneItems) {
-          this.createGoalCard(cards, goal, nextGoal && goal === nextGoal);
+
+        const columns = laneDetails.createDiv({ cls: "pure-progress-status-columns" });
+        const statusBuckets = [
+          { key: "NOT_STARTED", label: "Not Started" },
+          { key: "IN_PROGRESS", label: "In Progress" },
+          { key: "COMPLETED", label: "Completed" },
+        ];
+        for (const bucket of statusBuckets) {
+          const column = columns.createDiv({ cls: "pure-progress-status-column" });
+          const items = laneItems.filter(
+            (goal) => this.statusBucket(goal && goal.status) === bucket.key,
+          );
+          column.createEl("h4", { text: `${bucket.label} (${items.length})` });
+          const cards = column.createDiv({ cls: "pure-progress-cards" });
+          if (items.length === 0) {
+            cards.createEl("p", { cls: "pure-flow-empty", text: "No goals" });
+          }
+          for (const goal of items) {
+            this.createGoalCard(cards, goal, nextGoal && goal === nextGoal, {
+              enableModal: true,
+            });
+          }
         }
       }
     }
@@ -665,7 +683,12 @@ class PureTrackerFlowView extends ItemView {
 
     const draft = this.ensureEditorDraft(goals);
     this.renderGoalEditorForm(formPane, draft, goals);
-    this.renderGoalIssueList(listPane, goals);
+    const issuesDetails = listPane.createEl("details", { cls: "pure-goal-maker-collapse" });
+    issuesDetails.open = true;
+    issuesDetails.createEl("summary", {
+      text: `Goal Issues (${goals.length})`,
+    });
+    this.renderGoalIssueList(issuesDetails, goals);
   }
 
   /**
@@ -951,6 +974,9 @@ class PureTrackerFlowView extends ItemView {
           canvas,
           goal,
           false,
+          {
+            enableModal: true,
+          },
         );
         card.addClass("pure-goal-flow-node");
         card.style.left = `${useX}px`;
@@ -989,7 +1015,13 @@ class PureTrackerFlowView extends ItemView {
    * @param {any} goal
    * @param {boolean} isNextGoal
    */
-  createGoalCard(parent, goal, isNextGoal) {
+  createGoalCard(parent, goal, isNextGoal, options) {
+    const config = Object.assign(
+      {
+        enableModal: true,
+      },
+      options || {},
+    );
     const status = this.normalizeStatus(goal && goal.status);
     const statusClassKey = this.statusClassKey(status);
     const card = parent.createDiv({
@@ -1028,7 +1060,16 @@ class PureTrackerFlowView extends ItemView {
       text: goal.metric || "No metric",
     });
     card.title = goal.notes || "Click for details";
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (event) => {
+      if (card.dataset.dragJustHappened === "1") {
+        card.dataset.dragJustHappened = "";
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (!config.enableModal) {
+        return;
+      }
       this.openGoalModal(goal);
     });
     return card;
@@ -1401,6 +1442,12 @@ class PureTrackerFlowView extends ItemView {
         window.removeEventListener("mouseup", onMouseUp);
         const x = Number.parseFloat(card.style.left.replace("px", "")) || 0;
         const y = Number.parseFloat(card.style.top.replace("px", "")) || 0;
+        card.dataset.dragJustHappened = "1";
+        window.setTimeout(() => {
+          if (card && card.dataset) {
+            card.dataset.dragJustHappened = "";
+          }
+        }, 220);
         await this.persistGoalCardPosition(goalKey, x, y);
         await this.renderGraph();
       };
@@ -1442,6 +1489,33 @@ class PureTrackerFlowView extends ItemView {
     return String(goalId || "")
       .trim()
       .toLowerCase();
+  }
+
+  /**
+   * Returns normalized status bucket used for board columns.
+   *
+   * @param {string} raw
+   * @returns {string}
+   */
+  statusBucket(raw) {
+    const status = this.normalizeStatus(raw);
+    if (status === "completed" || status === "complete" || status === "done") {
+      return "COMPLETED";
+    }
+    if (status === "in progress" || status === "active" || status === "doing") {
+      return "IN_PROGRESS";
+    }
+    return "NOT_STARTED";
+  }
+
+  /**
+   * Returns whether a phase should start collapsed by default.
+   *
+   * @param {string} phase
+   * @returns {boolean}
+   */
+  isPhaseCollapsedByDefault(phase) {
+    return this.normalizeName(phase) === "pure start";
   }
 
   /**
