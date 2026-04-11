@@ -142,6 +142,15 @@
   font-size: 14px;
 }
 
+.pure-goal-card-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+  margin-bottom: 6px;
+}
+
 .pure-goal-card p {
   margin: 0;
   color: var(--text-muted);
@@ -417,6 +426,15 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.pure-goal-modal-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  object-fit: cover;
+  display: block;
+  margin: 6px 0;
 }
 
 .pure-goal-maker {

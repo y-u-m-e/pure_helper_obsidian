@@ -707,6 +707,7 @@ class PureTrackerFlowView extends ItemView {
       ["Phase", "phase", "text"],
       ["Category", "category", "text"],
       ["Goal", "goal", "text"],
+      ["Icon URL", "iconUrl", "url"],
       ["Metric", "metric", "text"],
       ["Dependencies (comma-separated goal IDs)", "dependenciesRaw", "text"],
     ];
@@ -801,7 +802,7 @@ class PureTrackerFlowView extends ItemView {
     const table = card.createEl("table", { cls: "pure-goal-issue-table" });
     const thead = table.createEl("thead");
     const headRow = thead.createEl("tr");
-    ["Key", "Summary", "Status", "Links", "Map", "Action"].forEach((label) => {
+    ["Key", "Summary", "Status", "Links", "Map", "Icon", "Action"].forEach((label) => {
       headRow.createEl("th", { text: label });
     });
     const tbody = table.createEl("tbody");
@@ -812,6 +813,7 @@ class PureTrackerFlowView extends ItemView {
       row.createEl("td", { text: this.formatStatus(goal.status) });
       row.createEl("td", { text: String(this.getGoalDependencies(goal).length) });
       row.createEl("td", { text: this.isGoalShownInMap(goal) ? "Yes" : "No" });
+      row.createEl("td", { text: this.normalizeIconUrl(goal.iconUrl) ? "Yes" : "No" });
       const actionCell = row.createEl("td");
       const editButton = actionCell.createEl("button", { text: "Edit" });
       editButton.addEventListener("click", async () => {
@@ -1000,6 +1002,17 @@ class PureTrackerFlowView extends ItemView {
       cls: "pure-goal-card-id",
       text: goal.goalId || "-",
     });
+    const iconUrl = this.normalizeIconUrl(goal && goal.iconUrl);
+    if (iconUrl) {
+      const icon = card.createEl("img", {
+        cls: "pure-goal-card-icon",
+      });
+      icon.src = iconUrl;
+      icon.alt = goal.goal || "Goal icon";
+      icon.addEventListener("error", () => {
+        icon.remove();
+      });
+    }
     card.createEl("h4", {
       text: goal.goal || "Untitled goal",
     });
@@ -1040,6 +1053,17 @@ class PureTrackerFlowView extends ItemView {
     modal.createEl("p", { text: `Goal ID: ${goal.goalId || "-"}` });
     modal.createEl("p", { text: `Phase: ${goal.phase || "-"}` });
     modal.createEl("p", { text: `Category: ${goal.category || "-"}` });
+    if (this.normalizeIconUrl(goal.iconUrl)) {
+      const preview = modal.createEl("img", {
+        cls: "pure-goal-modal-icon",
+      });
+      preview.src = this.normalizeIconUrl(goal.iconUrl);
+      preview.alt = goal.goal || "Goal icon";
+      preview.addEventListener("error", () => {
+        preview.remove();
+      });
+    }
+    modal.createEl("p", { text: `Icon URL: ${goal.iconUrl || "-"}` });
     modal.createEl("p", { text: `Metric: ${goal.metric || "-"}` });
     modal.createEl("p", { text: `Status: ${this.formatStatus(goal.status)}` });
     const dependencyLabel = modal.createEl("label", {
@@ -1162,6 +1186,7 @@ class PureTrackerFlowView extends ItemView {
       notes: "",
       dependenciesRaw: "",
       showInMap: true,
+      iconUrl: "",
     };
   }
 
@@ -1177,6 +1202,7 @@ class PureTrackerFlowView extends ItemView {
       phase: String((goal && goal.phase) || ""),
       category: String((goal && goal.category) || ""),
       goal: String((goal && goal.goal) || ""),
+      iconUrl: this.normalizeIconUrl(goal && goal.iconUrl),
       metric: String((goal && goal.metric) || ""),
       status: String((goal && goal.status) || "Not Started"),
       notes: String((goal && goal.notes) || ""),
@@ -1239,6 +1265,7 @@ class PureTrackerFlowView extends ItemView {
       phase: String(draft.phase || "").trim(),
       category: String(draft.category || "").trim(),
       goal: String(draft.goal || "").trim(),
+      iconUrl: this.normalizeIconUrl(draft.iconUrl),
       metric: String(draft.metric || "").trim(),
       status: String(draft.status || "Not Started").trim(),
       notes: String(draft.notes || "").trim(),
@@ -1415,6 +1442,23 @@ class PureTrackerFlowView extends ItemView {
     return String(goalId || "")
       .trim()
       .toLowerCase();
+  }
+
+  /**
+   * Normalizes icon URL value for safe rendering/storage.
+   *
+   * @param {any} raw
+   * @returns {string}
+   */
+  normalizeIconUrl(raw) {
+    const value = String(raw || "").trim();
+    if (!value) {
+      return "";
+    }
+    if (/^https?:\/\//i.test(value)) {
+      return value;
+    }
+    return "";
   }
 
   /**
@@ -2286,13 +2330,13 @@ class PureTrackerPlugin extends Plugin {
       "",
       "## Goals (goals.json)",
       "",
-      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies | Show In Map |",
-      "|---|---|---|---|---|---|---|---|---|",
+      "| Goal ID | Phase | Category | Goal | Icon URL | Metric | Status | Notes | Dependencies | Show In Map |",
+      "|---|---|---|---|---|---|---|---|---|---|",
     ];
 
     for (const item of goals.items || []) {
       lines.push(
-        `| ${this.toTableCell(item.goalId)} | ${this.toTableCell(item.phase)} | ${this.toTableCell(item.category)} | ${this.toTableCell(item.goal)} | ${this.toTableCell(item.metric)} | ${this.toTableCell(item.status)} | ${this.toTableCell(item.notes)} | ${this.toTableCell(this.getGoalDependencies(item).join(", "))} | ${this.toTableCell(this.isGoalShownInMap(item) ? "true" : "false")} |`,
+        `| ${this.toTableCell(item.goalId)} | ${this.toTableCell(item.phase)} | ${this.toTableCell(item.category)} | ${this.toTableCell(item.goal)} | ${this.toTableCell(this.normalizeIconUrl(item.iconUrl))} | ${this.toTableCell(item.metric)} | ${this.toTableCell(item.status)} | ${this.toTableCell(item.notes)} | ${this.toTableCell(this.getGoalDependencies(item).join(", "))} | ${this.toTableCell(this.isGoalShownInMap(item) ? "true" : "false")} |`,
       );
     }
 
@@ -2356,15 +2400,16 @@ class PureTrackerPlugin extends Plugin {
       phase: cells[1] || "",
       category: cells[2] || "",
       goal: cells[3] || "",
-      metric: cells[4] || "",
-      status: cells[5] || "",
-      notes: cells[6] || "",
-      dependencies: String(cells[7] || "")
+      iconUrl: this.normalizeIconUrl(cells[4]),
+      metric: cells[5] || "",
+      status: cells[6] || "",
+      notes: cells[7] || "",
+      dependencies: String(cells[8] || "")
         .split(",")
         .map((value) => value.trim())
         .filter((value) => value.length > 0),
       showInMap: (() => {
-        const raw = String(cells[8] || "true").trim().toLowerCase();
+        const raw = String(cells[9] || "true").trim().toLowerCase();
         return raw === "true" || raw === "1" || raw === "yes";
       })(),
     }));
@@ -2432,12 +2477,12 @@ class PureTrackerPlugin extends Plugin {
       "",
       "[[OSRS/Pure Tracker/README|Pure Tracker Index]]",
       "",
-      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies | Show In Map |",
-      "|---|---|---|---|---|---|---|---|---|",
+      "| Goal ID | Phase | Category | Goal | Icon URL | Metric | Status | Notes | Dependencies | Show In Map |",
+      "|---|---|---|---|---|---|---|---|---|---|",
     ];
     for (const goal of items) {
       lines.push(
-        `| ${goal.goalId || ""} | ${goal.phase || ""} | ${goal.category || ""} | ${goal.goal || ""} | ${goal.metric || ""} | ${goal.status || ""} | ${goal.notes || ""} | ${this.getGoalDependencies(goal).join(", ")} | ${this.isGoalShownInMap(goal) ? "true" : "false"} |`,
+        `| ${goal.goalId || ""} | ${goal.phase || ""} | ${goal.category || ""} | ${goal.goal || ""} | ${this.normalizeIconUrl(goal.iconUrl)} | ${goal.metric || ""} | ${goal.status || ""} | ${goal.notes || ""} | ${this.getGoalDependencies(goal).join(", ")} | ${this.isGoalShownInMap(goal) ? "true" : "false"} |`,
       );
     }
     lines.push("", "#pure-tracker #goals");
