@@ -368,7 +368,7 @@ function loadFs() {
 }
 
 /**
- * Obsidian custom graph-like dashboard view for Pure Tracker data.
+ * Obsidian custom progression dashboard for Pure Tracker data.
  */
 class PureTrackerFlowView extends ItemView {
   /**
@@ -380,12 +380,12 @@ class PureTrackerFlowView extends ItemView {
     this.plugin = plugin;
     this.viewState = {
       severity: "ALL",
-      questLimit: 10,
-      diaryLimit: 10,
-      zoomPercent: 100,
-      selectedKey: "",
-      selectedType: "",
+      blockerLimit: 25,
+      statusFilter: "ALL",
+      goalSearch: "",
+      includeCompleted: true,
     };
+    this.modalEl = null;
   }
 
   /**
@@ -399,14 +399,14 @@ class PureTrackerFlowView extends ItemView {
    * @returns {string}
    */
   getDisplayText() {
-    return "Pure Tracker Flow";
+    return "Pure Tracker Progress";
   }
 
   /**
    * @returns {string}
    */
   getIcon() {
-    return "workflow";
+    return "kanban-square";
   }
 
   /**
@@ -438,11 +438,12 @@ class PureTrackerFlowView extends ItemView {
    */
   async onClose() {
     this.contentEl.removeClass("pure-flow-view");
+    this.closeGoalModal();
     this.contentEl.empty();
   }
 
   /**
-   * Renders graph-style cards and links from current JSON data.
+   * Renders progression board and blocker tables.
    *
    * @returns {Promise<void>}
    */
@@ -452,163 +453,105 @@ class PureTrackerFlowView extends ItemView {
     const diaries = await this.plugin.readJson("derived_not_completable_diaries.json", { items: [] });
 
     const goalItems = goals.items || [];
-    const nextGoal = goalItems.find((goal) => !this.isCompleted(goal && goal.status));
-    const sourceLabel = nextGoal
-      ? `${nextGoal.goalId || "?"} - ${nextGoal.goal || "Untitled goal"}`
-      : "All goals complete";
-
-    const filteredQuests = this.filterBySeverity(quests.items || []).slice(0, this.viewState.questLimit);
-    const filteredDiaries = this.filterBySeverity(diaries.items || []).slice(0, this.viewState.diaryLimit);
+    const filteredGoals = this.filterGoals(goalItems);
+    const groupedGoals = this.groupGoalsByPhase(filteredGoals);
+    const orderedPhases = this.getPhaseOrder(filteredGoals);
+    const nextGoal = filteredGoals.find((goal) => !this.isCompleted(goal && goal.status));
+    const filteredQuests = this.filterBySeverity(quests.items || []).slice(0, this.viewState.blockerLimit);
+    const filteredDiaries = this.filterBySeverity(diaries.items || []).slice(0, this.viewState.blockerLimit);
 
     this.contentEl.empty();
+    this.closeGoalModal();
 
     const header = this.contentEl.createDiv({ cls: "pure-flow-header" });
-    header.createEl("h2", { text: "Pure Tracker Flow Dashboard" });
+    header.createEl("h2", { text: "Pure Tracker Progress Dashboard" });
     header.createEl("p", {
-      text: "Interactive blocker map. Filter severity, zoom the board, and inspect item details.",
+      text: "Track your custom goals by phase, open detailed card modals, and review not-doable lists in clean tables.",
     });
 
     const controls = this.contentEl.createDiv({ cls: "pure-flow-controls" });
-    this.addControlSelect(controls, "Severity", ["ALL", "BLOCKED", "RISKY"], this.viewState.severity, (value) => {
-      this.viewState.severity = value;
+    this.addControlSelect(controls, "Goal Status", ["ALL", "NOT_STARTED", "IN_PROGRESS", "COMPLETED"], this.viewState.statusFilter, (value) => {
+      this.viewState.statusFilter = value;
       this.renderGraph();
     });
-    this.addControlSelect(controls, "Quest Nodes", ["6", "10", "15", "20"], String(this.viewState.questLimit), (value) => {
-      this.viewState.questLimit = Number(value) || 10;
+    this.addControlSelect(
+      controls,
+      "Blocker Severity",
+      ["ALL", "BLOCKED", "RISKY"],
+      this.viewState.severity,
+      (value) => {
+        this.viewState.severity = value;
+        this.renderGraph();
+      },
+    );
+    this.addControlSelect(
+      controls,
+      "Blocker Rows",
+      ["10", "25", "50", "100"],
+      String(this.viewState.blockerLimit),
+      (value) => {
+        this.viewState.blockerLimit = Number(value) || 25;
+        this.renderGraph();
+      },
+    );
+    this.addGoalSearchControl(controls);
+    this.addToggleControl(controls, "Show Completed", this.viewState.includeCompleted, (checked) => {
+      this.viewState.includeCompleted = checked;
       this.renderGraph();
     });
-    this.addControlSelect(controls, "Diary Nodes", ["6", "10", "15", "20"], String(this.viewState.diaryLimit), (value) => {
-      this.viewState.diaryLimit = Number(value) || 10;
-      this.renderGraph();
+    this.addControlButton(controls, "Refresh", async () => {
+      await this.renderGraph();
     });
-    this.addControlSelect(controls, "Zoom", ["80", "100", "125", "150"], String(this.viewState.zoomPercent), (value) => {
-      this.viewState.zoomPercent = Number(value) || 100;
-      this.renderGraph();
+    this.addControlButton(controls, "Open Data Sheets", async () => {
+      await this.plugin.openNote("OSRS/Pure Tracker/Data Sheets.md");
     });
-    this.addControlButton(controls, "Refresh", () => this.renderGraph());
-    this.addControlButton(controls, "Open Data Sheets", () => this.plugin.openNote("OSRS/Pure Tracker/Data Sheets.md"));
-    this.addControlButton(controls, "Open Home", () => this.plugin.openNote("OSRS/Pure Tracker/Home.md"));
+    this.addControlButton(controls, "Open Home", async () => {
+      await this.plugin.openNote("OSRS/Pure Tracker/Home.md");
+    });
 
     const stats = this.contentEl.createDiv({ cls: "pure-flow-stats" });
-    this.addStat(stats, "Goals", String(goalItems.length));
+    this.addStat(stats, "Total Goals", String(goalItems.length));
+    this.addStat(stats, "Visible Goals", String(filteredGoals.length));
     this.addStat(stats, "Quest Blockers", String(filteredQuests.length));
     this.addStat(stats, "Diary Blockers", String(filteredDiaries.length));
-    this.addStat(stats, "Active Filter", this.viewState.severity);
-
-    const workspace = this.contentEl.createDiv({ cls: "pure-flow-workspace" });
-    const graphViewport = workspace.createDiv({ cls: "pure-flow-viewport" });
-    const graph = graphViewport.createDiv({ cls: "pure-flow-graph" });
-
-    const zoom = (this.viewState.zoomPercent || 100) / 100;
-    graph.style.transform = `scale(${zoom})`;
-    graph.style.transformOrigin = "top left";
-
-    const graphWidth = 1500;
-    const graphHeight = Math.max(760, 130 + Math.max(filteredQuests.length, filteredDiaries.length) * 100);
-    graph.style.width = `${graphWidth}px`;
-    graph.style.height = `${graphHeight}px`;
-
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("class", "pure-flow-links");
-    svg.setAttribute("viewBox", `0 0 ${graphWidth} ${graphHeight}`);
-    svg.setAttribute("preserveAspectRatio", "none");
-    graph.appendChild(svg);
-
-    const sourcePoint = { x: 330, y: graphHeight / 2 };
-    const sourceNode = this.createFlowNode(
-      graph,
-      "source",
+    this.addStat(
+      stats,
       "Next Goal",
-      sourceLabel,
-      "ACTIONABLE",
-      "",
-      40,
-      sourcePoint.y - 60,
-      "source-next-goal",
+      nextGoal ? `${nextGoal.goalId || "?"} ${nextGoal.goal || ""}`.trim() : "All complete",
     );
-    sourceNode.classList.add("pure-flow-node-source");
 
-    const questTitle = graph.createDiv({ cls: "pure-flow-column-label" });
-    questTitle.setText("Quest blockers");
-    questTitle.style.left = "470px";
-    questTitle.style.top = "16px";
-
-    const diaryTitle = graph.createDiv({ cls: "pure-flow-column-label" });
-    diaryTitle.setText("Diary blockers");
-    diaryTitle.style.left = "940px";
-    diaryTitle.style.top = "16px";
-
-    const questCenters = new Map();
-    const diaryCenters = new Map();
-
-    for (let index = 0; index < filteredQuests.length; index++) {
-      const item = filteredQuests[index];
-      const y = 70 + index * 100;
-      const key = `quest:${item.ruleId || item.quest || index}`;
-      this.createFlowNode(
-        graph,
-        "quest",
-        item.quest || "Unknown quest",
-        item.riskReason || "No reason provided",
-        item.severity || "UNKNOWN",
-        item.reasonCode || "UNKNOWN",
-        470,
-        y,
-        key,
-      );
-      questCenters.set(this.normalizeName(item.quest || ""), { x: 470, y: y + 58 });
-      this.drawLink(svg, sourcePoint.x, sourcePoint.y, 470, y + 58, "quest");
-    }
-
-    for (let index = 0; index < filteredDiaries.length; index++) {
-      const item = filteredDiaries[index];
-      const y = 70 + index * 100;
-      const key = `diary:${item.ruleId || item.diary || index}`;
-      this.createFlowNode(
-        graph,
-        "diary",
-        `${item.diary || "Unknown diary"} (${item.tier || "?"})`,
-        item.riskReason || "No reason provided",
-        item.severity || "BLOCKED",
-        item.reasonCode || "UNKNOWN",
-        940,
-        y,
-        key,
-      );
-      diaryCenters.set(key, { x: 940, y: y + 58 });
-      this.drawLink(svg, sourcePoint.x, sourcePoint.y, 940, y + 58, "diary");
-    }
-
-    for (const diary of filteredDiaries) {
-      if (!diary || !diary.blockedBy) {
-        continue;
-      }
-      const questPoint = questCenters.get(this.normalizeName(diary.blockedBy));
-      const diaryPoint = diaryCenters.get(`diary:${diary.ruleId || diary.diary || ""}`);
-      if (!questPoint || !diaryPoint) {
-        continue;
-      }
-      this.drawLink(svg, diaryPoint.x, diaryPoint.y, questPoint.x, questPoint.y, "dependency");
-    }
-
-    const details = workspace.createDiv({ cls: "pure-flow-details" });
-    details.createEl("h3", { text: "Selection" });
-    const selected = this.resolveSelection(filteredQuests, filteredDiaries, nextGoal);
-    if (!selected) {
-      details.createEl("p", {
+    const board = this.contentEl.createDiv({ cls: "pure-progress-board" });
+    if (orderedPhases.length === 0) {
+      board.createEl("p", {
         cls: "pure-flow-empty",
-        text: "Select a node to inspect full reason details.",
+        text: "No goals match current filters.",
       });
     } else {
-      details.createDiv({ cls: "pure-flow-detail-row", text: `Type: ${selected.type}` });
-      details.createDiv({ cls: "pure-flow-detail-row", text: `Title: ${selected.title}` });
-      details.createDiv({ cls: "pure-flow-detail-row", text: `Severity: ${selected.severity || "-"}` });
-      details.createDiv({ cls: "pure-flow-detail-row", text: `Reason code: ${selected.reasonCode || "-"}` });
-      details.createEl("p", {
-        cls: "pure-flow-detail-reason",
-        text: selected.reason || "No reason details available.",
-      });
+      for (const phase of orderedPhases) {
+        const lane = board.createDiv({ cls: "pure-progress-lane" });
+        lane.createEl("h3", { text: phase || "Unspecified Phase" });
+        const laneItems = groupedGoals.get(phase) || [];
+        lane.createEl("p", {
+          cls: "pure-progress-lane-meta",
+          text: `${laneItems.length} goals`,
+        });
+        const cards = lane.createDiv({ cls: "pure-progress-cards" });
+        for (const goal of laneItems) {
+          this.createGoalCard(cards, goal, nextGoal && goal === nextGoal);
+        }
+      }
     }
+
+    const blockerSection = this.contentEl.createDiv({ cls: "pure-blocker-section" });
+    blockerSection.createEl("h3", { text: "Not Doable Lists" });
+    blockerSection.createEl("p", {
+      cls: "pure-progress-lane-meta",
+      text: "Shown as tables so they are easy to scan and sort mentally.",
+    });
+
+    const tables = blockerSection.createDiv({ cls: "pure-blocker-tables" });
+    this.renderQuestTable(tables, filteredQuests);
+    this.renderDiaryTable(tables, filteredDiaries);
   }
 
   /**
@@ -622,13 +565,6 @@ class PureTrackerFlowView extends ItemView {
     card.createEl("strong", { cls: "pure-flow-stat-value", text: value });
   }
 
-  /**
-   * Creates a dashboard control button.
-   *
-   * @param {HTMLElement} container
-   * @param {string} label
-   * @param {() => void | Promise<void>} onClick
-   */
   addControlButton(container, label, onClick) {
     const button = container.createEl("button", { text: label });
     button.addClass("pure-flow-control-button");
@@ -637,15 +573,6 @@ class PureTrackerFlowView extends ItemView {
     });
   }
 
-  /**
-   * Creates a dashboard select control.
-   *
-   * @param {HTMLElement} container
-   * @param {string} label
-   * @param {string[]} options
-   * @param {string} currentValue
-   * @param {(value: string) => void} onChange
-   */
   addControlSelect(container, label, options, currentValue, onChange) {
     const wrap = container.createDiv({ cls: "pure-flow-control-group" });
     wrap.createEl("label", { text: label });
@@ -663,56 +590,176 @@ class PureTrackerFlowView extends ItemView {
   }
 
   /**
-   * Creates one clickable node card.
+   * Adds goal search control.
    *
-   * @param {HTMLElement} graph
-   * @param {string} type
-   * @param {string} title
-   * @param {string} reason
-   * @param {string} severity
-   * @param {string} reasonCode
-   * @param {number} x
-   * @param {number} y
-   * @param {string} key
-   * @returns {HTMLElement}
+   * @param {HTMLElement} container
    */
-  createFlowNode(graph, type, title, reason, severity, reasonCode, x, y, key) {
-    const node = graph.createDiv({
-      cls: `pure-flow-node pure-flow-node-${type} pure-flow-severity-${String(severity || "").toLowerCase()}`,
+  addGoalSearchControl(container) {
+    const wrap = container.createDiv({ cls: "pure-flow-control-group" });
+    wrap.createEl("label", { text: "Goal Search" });
+    const input = wrap.createEl("input", {
+      type: "text",
+      value: this.viewState.goalSearch || "",
+      placeholder: "Search goal text...",
     });
-    node.style.left = `${x}px`;
-    node.style.top = `${y}px`;
-    node.createEl("h4", { text: title || "Untitled node" });
-    node.createEl("p", { text: reasonCode ? `${severity} - ${reasonCode}` : severity || "UNKNOWN" });
-    node.createEl("p", { text: reason || "" });
-    if (this.viewState.selectedKey === key) {
-      node.addClass("is-selected");
-    }
-    node.addEventListener("click", () => {
-      this.viewState.selectedKey = key;
-      this.viewState.selectedType = type;
+    input.addClass("pure-flow-control-input");
+    input.addEventListener("input", () => {
+      this.viewState.goalSearch = input.value || "";
       this.renderGraph();
     });
-    return node;
   }
 
   /**
-   * Draws one bezier link in the graph background.
+   * Adds boolean checkbox control.
    *
-   * @param {SVGElement} svg
-   * @param {number} x1
-   * @param {number} y1
-   * @param {number} x2
-   * @param {number} y2
-   * @param {string} type
+   * @param {HTMLElement} container
+   * @param {string} label
+   * @param {boolean} checked
+   * @param {(checked: boolean) => void} onChange
    */
-  drawLink(svg, x1, y1, x2, y2, type) {
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const c1x = x1 + 80;
-    const c2x = x2 - 80;
-    path.setAttribute("d", `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`);
-    path.setAttribute("class", `pure-flow-link pure-flow-link-${type}`);
-    svg.appendChild(path);
+  addToggleControl(container, label, checked, onChange) {
+    const wrap = container.createDiv({ cls: "pure-flow-toggle-wrap" });
+    const checkbox = wrap.createEl("input", { type: "checkbox" });
+    checkbox.checked = !!checked;
+    checkbox.addEventListener("change", () => {
+      onChange(checkbox.checked);
+    });
+    wrap.createEl("span", { text: label });
+  }
+
+  /**
+   * Renders one quest blocker table.
+   *
+   * @param {HTMLElement} parent
+   * @param {any[]} items
+   */
+  renderQuestTable(parent, items) {
+    const wrap = parent.createDiv({ cls: "pure-blocker-table-wrap" });
+    wrap.createEl("h4", { text: "Quest Blockers" });
+    const table = wrap.createEl("table", { cls: "pure-blocker-table" });
+    const thead = table.createEl("thead");
+    const headRow = thead.createEl("tr");
+    ["Quest", "Severity", "Reason Code", "Reason"].forEach((header) => {
+      headRow.createEl("th", { text: header });
+    });
+    const tbody = table.createEl("tbody");
+    for (const item of items) {
+      const row = tbody.createEl("tr");
+      row.createEl("td", { text: item.quest || "-" });
+      row.createEl("td", { text: item.severity || "-" });
+      row.createEl("td", { text: item.reasonCode || "-" });
+      row.createEl("td", { text: item.riskReason || "-" });
+    }
+  }
+
+  /**
+   * Renders one diary blocker table.
+   *
+   * @param {HTMLElement} parent
+   * @param {any[]} items
+   */
+  renderDiaryTable(parent, items) {
+    const wrap = parent.createDiv({ cls: "pure-blocker-table-wrap" });
+    wrap.createEl("h4", { text: "Diary Blockers" });
+    const table = wrap.createEl("table", { cls: "pure-blocker-table" });
+    const thead = table.createEl("thead");
+    const headRow = thead.createEl("tr");
+    ["Diary", "Tier", "Severity", "Reason Code", "Reason"].forEach((header) => {
+      headRow.createEl("th", { text: header });
+    });
+    const tbody = table.createEl("tbody");
+    for (const item of items) {
+      const row = tbody.createEl("tr");
+      row.createEl("td", { text: item.diary || "-" });
+      row.createEl("td", { text: item.tier || "-" });
+      row.createEl("td", { text: item.severity || "-" });
+      row.createEl("td", { text: item.reasonCode || "-" });
+      row.createEl("td", { text: item.riskReason || "-" });
+    }
+  }
+
+  /**
+   * Creates one goal card in progression board.
+   *
+   * @param {HTMLElement} parent
+   * @param {any} goal
+   * @param {boolean} isNextGoal
+   */
+  createGoalCard(parent, goal, isNextGoal) {
+    const status = this.normalizeStatus(goal && goal.status);
+    const statusClassKey = this.statusClassKey(status);
+    const card = parent.createDiv({
+      cls: `pure-goal-card pure-goal-status-${statusClassKey}`,
+    });
+    if (isNextGoal) {
+      card.addClass("is-next-goal");
+    }
+    card.createEl("div", {
+      cls: "pure-goal-card-id",
+      text: goal.goalId || "-",
+    });
+    card.createEl("h4", {
+      text: goal.goal || "Untitled goal",
+    });
+    card.createEl("p", {
+      text: goal.category || "Uncategorized",
+    });
+    const meta = card.createDiv({ cls: "pure-goal-card-meta" });
+    meta.createEl("span", {
+      cls: `pure-goal-status-badge pure-goal-status-badge-${statusClassKey}`,
+      text: this.formatStatus(goal.status),
+    });
+    meta.createEl("span", {
+      text: goal.metric || "No metric",
+    });
+    card.title = goal.notes || "Click for details";
+    card.addEventListener("click", () => {
+      this.openGoalModal(goal);
+    });
+  }
+
+  /**
+   * Opens modal-like overlay for one goal item.
+   *
+   * @param {any} goal
+   */
+  openGoalModal(goal) {
+    this.closeGoalModal();
+    const backdrop = this.contentEl.createDiv({ cls: "pure-goal-modal-backdrop" });
+    const modal = backdrop.createDiv({ cls: "pure-goal-modal" });
+    const top = modal.createDiv({ cls: "pure-goal-modal-top" });
+    top.createEl("h3", { text: goal.goal || "Untitled goal" });
+    const closeButton = top.createEl("button", { text: "Close" });
+    closeButton.addClass("pure-goal-modal-close");
+    closeButton.addEventListener("click", () => {
+      this.closeGoalModal();
+    });
+    modal.createEl("p", { text: `Goal ID: ${goal.goalId || "-"}` });
+    modal.createEl("p", { text: `Phase: ${goal.phase || "-"}` });
+    modal.createEl("p", { text: `Category: ${goal.category || "-"}` });
+    modal.createEl("p", { text: `Metric: ${goal.metric || "-"}` });
+    modal.createEl("p", { text: `Status: ${this.formatStatus(goal.status)}` });
+    modal.createEl("p", {
+      cls: "pure-goal-modal-notes",
+      text: `Notes: ${goal.notes || "No notes provided."}`,
+    });
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        this.closeGoalModal();
+      }
+    });
+    this.modalEl = backdrop;
+  }
+
+  /**
+   * Closes active goal modal.
+   */
+  closeGoalModal() {
+    if (!this.modalEl) {
+      return;
+    }
+    this.modalEl.remove();
+    this.modalEl = null;
   }
 
   /**
@@ -729,63 +776,102 @@ class PureTrackerFlowView extends ItemView {
   }
 
   /**
-   * Resolves selected node details for sidebar rendering.
+   * Filters goals by controls.
    *
-   * @param {any[]} quests
-   * @param {any[]} diaries
-   * @param {any} nextGoal
-   * @returns {any}
+   * @param {any[]} goals
+   * @returns {any[]}
    */
-  resolveSelection(quests, diaries, nextGoal) {
-    if (!this.viewState.selectedKey) {
-      if (!nextGoal) {
-        return null;
+  filterGoals(goals) {
+    const search = String(this.viewState.goalSearch || "")
+      .trim()
+      .toLowerCase();
+    const filtered = [];
+    for (const goal of goals) {
+      if (!goal) {
+        continue;
       }
-      return {
-        type: "Goal",
-        title: nextGoal.goal || "All goals complete",
-        severity: "ACTIONABLE",
-        reasonCode: "NEXT_GOAL",
-        reason: nextGoal.notes || "Next unfinished goal based on goal list ordering.",
-      };
+      if (!this.viewState.includeCompleted && this.isCompleted(goal.status)) {
+        continue;
+      }
+      if (this.viewState.statusFilter !== "ALL") {
+        const status = this.normalizeStatus(goal.status);
+        if (this.viewState.statusFilter === "COMPLETED" && status !== "completed" && status !== "complete" && status !== "done") {
+          continue;
+        }
+        if (this.viewState.statusFilter === "IN_PROGRESS" && status !== "in progress" && status !== "active" && status !== "doing") {
+          continue;
+        }
+        if (this.viewState.statusFilter === "NOT_STARTED" && status !== "not started" && status !== "no started" && status !== "todo" && status !== "backlog") {
+          continue;
+        }
+      }
+      if (search) {
+        const hay = `${goal.goalId || ""} ${goal.phase || ""} ${goal.category || ""} ${goal.goal || ""} ${goal.metric || ""} ${goal.notes || ""}`.toLowerCase();
+        if (hay.indexOf(search) === -1) {
+          continue;
+        }
+      }
+      filtered.push(goal);
     }
-    if (this.viewState.selectedKey === "source-next-goal") {
-      return {
-        type: "Goal",
-        title: nextGoal ? nextGoal.goal || "Untitled goal" : "All goals complete",
-        severity: "ACTIONABLE",
-        reasonCode: "NEXT_GOAL",
-        reason: nextGoal ? nextGoal.notes || "No notes." : "No unfinished goals were found.",
-      };
-    }
+    return filtered;
+  }
 
-    for (const quest of quests) {
-      const key = `quest:${quest.ruleId || quest.quest || ""}`;
-      if (key === this.viewState.selectedKey) {
-        return {
-          type: "Quest",
-          title: quest.quest || "Unknown quest",
-          severity: quest.severity || "UNKNOWN",
-          reasonCode: quest.reasonCode || "UNKNOWN",
-          reason: quest.riskReason || "No reason provided.",
-        };
+  /**
+   * Groups goals by phase while preserving order.
+   *
+   * @param {any[]} goals
+   * @returns {Map<string, any[]>}
+   */
+  groupGoalsByPhase(goals) {
+    const grouped = new Map();
+    for (const goal of goals) {
+      const phase = String(goal.phase || "Unspecified Phase").trim() || "Unspecified Phase";
+      if (!grouped.has(phase)) {
+        grouped.set(phase, []);
+      }
+      grouped.get(phase).push(goal);
+    }
+    return grouped;
+  }
+
+  /**
+   * Returns ordered phase keys from goals.
+   *
+   * @param {any[]} goals
+   * @returns {string[]}
+   */
+  getPhaseOrder(goals) {
+    const seen = new Set();
+    const ordered = [];
+    for (const goal of goals) {
+      const phase = String(goal && goal.phase ? goal.phase : "Unspecified Phase").trim() || "Unspecified Phase";
+      if (!seen.has(phase)) {
+        seen.add(phase);
+        ordered.push(phase);
       }
     }
+    return ordered;
+  }
 
-    for (const diary of diaries) {
-      const key = `diary:${diary.ruleId || diary.diary || ""}`;
-      if (key === this.viewState.selectedKey) {
-        return {
-          type: "Diary",
-          title: `${diary.diary || "Unknown diary"} (${diary.tier || "?"})`,
-          severity: diary.severity || "UNKNOWN",
-          reasonCode: diary.reasonCode || "UNKNOWN",
-          reason: diary.riskReason || "No reason provided.",
-        };
-      }
+  /**
+   * @param {string} raw
+   * @returns {string}
+   */
+  formatStatus(raw) {
+    const status = this.normalizeStatus(raw);
+    if (!status) {
+      return "Unspecified";
     }
-
-    return null;
+    if (status === "no started") {
+      return "Not Started";
+    }
+    if (status === "todo") {
+      return "Not Started";
+    }
+    if (status === "in progress") {
+      return "In Progress";
+    }
+    return raw || "Unspecified";
   }
 
   /**
@@ -807,7 +893,7 @@ class PureTrackerFlowView extends ItemView {
    */
   isCompleted(raw) {
     const status = this.normalizeStatus(raw);
-    return ["completed", "complete", "done"].indexOf(status) >= 0;
+    return status === "completed" || status === "complete" || status === "done";
   }
 
   /**
@@ -815,7 +901,131 @@ class PureTrackerFlowView extends ItemView {
    * @returns {string}
    */
   normalizeStatus(raw) {
-    return String(raw || "").trim().toLowerCase();
+    return String(raw || "")
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Converts status text into CSS-safe token.
+   *
+   * @param {string} status
+   * @returns {string}
+   */
+  statusClassKey(status) {
+    return String(status || "unknown")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .trim() || "unknown";
+  }
+
+  /**
+   * Renders blocker tables for not-doable items.
+   *
+   * @param {HTMLElement} parent
+   * @param {any[]} quests
+   * @param {any[]} diaries
+   */
+  renderBlockerTables(parent, quests, diaries) {
+    const tables = parent.createDiv({ cls: "pure-blocker-tables" });
+    this.renderQuestTable(tables, quests);
+    this.renderDiaryTable(tables, diaries);
+  }
+
+  /**
+   * Adds a section heading.
+   *
+   * @param {HTMLElement} parent
+   * @param {string} text
+   */
+  addSectionHeading(parent, text) {
+    const heading = parent.createDiv({ cls: "pure-section-heading" });
+    heading.createEl("h3", { text: text });
+  }
+
+  /**
+   * Adds legend chips for goal statuses.
+   *
+   * @param {HTMLElement} parent
+   */
+  addGoalLegend(parent) {
+    const legend = parent.createDiv({ cls: "pure-goal-legend" });
+    ["Not Started", "In Progress", "Completed"].forEach((label) => {
+      const normalized = this.normalizeStatus(label);
+      const statusClassKey = this.statusClassKey(normalized);
+      const chip = legend.createDiv({
+        cls: `pure-goal-status-badge pure-goal-status-badge-${statusClassKey}`,
+      });
+      chip.setText(label);
+    });
+  }
+
+  /**
+   * Adds top-level progression content wrapper.
+   *
+   * @returns {HTMLElement}
+   */
+  createProgressionWrapper() {
+    return this.contentEl.createDiv({ cls: "pure-progress-wrapper" });
+  }
+
+  /**
+   * Adds goal section metadata.
+   *
+   * @param {HTMLElement} container
+   * @param {number} totalGoals
+   */
+  addGoalMeta(container, totalGoals) {
+    container.createEl("p", {
+      cls: "pure-progress-meta",
+      text: `Custom goals shown in progression columns (${totalGoals}). Click any card for full details.`,
+    });
+  }
+
+  /**
+   * Adds board header for goals section.
+   *
+   * @param {HTMLElement} container
+   */
+  addGoalsHeading(container) {
+    const head = container.createDiv({ cls: "pure-progress-head" });
+    head.createEl("h3", { text: "Goal Progression Board" });
+    this.addGoalLegend(head);
+  }
+
+  /**
+   * Renders complete goals section.
+   *
+   * @param {any[]} filteredGoals
+   * @param {Map<string, any[]>} groupedGoals
+   * @param {string[]} orderedPhases
+   */
+  renderGoalsSection(filteredGoals, groupedGoals, orderedPhases) {
+    const wrap = this.createProgressionWrapper();
+    this.addGoalsHeading(wrap);
+    this.addGoalMeta(wrap, filteredGoals.length);
+    const board = wrap.createDiv({ cls: "pure-progress-board" });
+    if (orderedPhases.length === 0) {
+      board.createEl("p", {
+        cls: "pure-flow-empty",
+        text: "No goals match current filters.",
+      });
+      return;
+    }
+
+    for (const phase of orderedPhases) {
+      const lane = board.createDiv({ cls: "pure-progress-lane" });
+      lane.createEl("h3", { text: phase || "Unspecified Phase" });
+      const laneItems = groupedGoals.get(phase) || [];
+      lane.createEl("p", {
+        cls: "pure-progress-lane-meta",
+        text: `${laneItems.length} goals`,
+      });
+      const cards = lane.createDiv({ cls: "pure-progress-cards" });
+      for (const goal of laneItems) {
+        this.createGoalCard(cards, goal, false);
+      }
+    }
   }
 }
 
