@@ -1,0 +1,33 @@
+name: Release Obsidian Plugin
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required files exist
+        run: |
+          test -f manifest.json
+          test -f main.js
+          test -f styles.css
+          test -f versions.json
+
+      - name: Create release and upload BRAT assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            manifest.json
+            main.js
+            styles.css
+            versions.json
