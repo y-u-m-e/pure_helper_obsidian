@@ -1,0 +1,178 @@
+.pure-tracker-wrap {
+  padding: 12px;
+}
+
+.pure-tracker-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.pure-tracker-tabs button {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.pure-tracker-tabs button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.pure-tracker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pure-tracker-actions button {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.pure-tracker-actions + .pure-tracker-actions {
+  margin-top: -4px;
+}
+
+.pure-tracker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pure-tracker-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--background-secondary);
+}
+
+.pure-tracker-card h4 {
+  margin: 0 0 6px;
+}
+
+.pure-tracker-card p {
+  margin: 4px 0;
+}
+
+.pure-tracker-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.pure-flow-view {
+  padding: 14px;
+}
+
+.pure-flow-header h2 {
+  margin: 0;
+}
+
+.pure-flow-header p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.pure-flow-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pure-flow-stat {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 130px;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-secondary);
+}
+
+.pure-flow-stat-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pure-flow-stat-value {
+  font-size: 18px;
+}
+
+.pure-flow-graph {
+  margin-top: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  position: relative;
+  height: 620px;
+  overflow: auto;
+  background: radial-gradient(circle at 20% 20%, var(--background-secondary), var(--background-primary));
+}
+
+.pure-flow-links {
+  position: absolute;
+  inset: 0;
+  width: 1200px;
+  height: 620px;
+  pointer-events: none;
+}
+
+.pure-flow-link {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.85;
+}
+
+.pure-flow-link-quest {
+  stroke: #e0a53a;
+}
+
+.pure-flow-link-diary {
+  stroke: #7ba6ff;
+}
+
+.pure-flow-column-label {
+  position: absolute;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pure-flow-node {
+  position: absolute;
+  width: 300px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--background-secondary);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.pure-flow-node h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.pure-flow-node p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pure-flow-node-source {
+  border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border) 55%);
+}
+
+.pure-flow-node-quest {
+  border-color: color-mix(in srgb, #e0a53a 45%, var(--background-modifier-border) 55%);
+}
+
+.pure-flow-node-diary {
+  border-color: color-mix(in srgb, #7ba6ff 45%, var(--background-modifier-border) 55%);
+}
+
