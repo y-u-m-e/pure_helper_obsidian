@@ -501,8 +501,8 @@ class PureTrackerFlowView extends ItemView {
       },
     );
     this.addGoalSearchControl(controls);
-    this.addToggleControl(controls, "Show Completed", this.viewState.includeCompleted, (checked) => {
-      this.viewState.includeCompleted = checked;
+    this.addToggleControl(controls, "Hide Completed (Global)", !this.viewState.includeCompleted, (checked) => {
+      this.viewState.includeCompleted = !checked;
       this.renderGraph();
     });
     this.addControlButton(controls, "Refresh", async () => {
