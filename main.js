@@ -542,16 +542,27 @@ class PureTrackerFlowView extends ItemView {
       }
     }
 
+    this.renderGoalDependencyMap(filteredGoals);
+
     const blockerSection = this.contentEl.createDiv({ cls: "pure-blocker-section" });
     blockerSection.createEl("h3", { text: "Not Doable Lists" });
     blockerSection.createEl("p", {
       cls: "pure-progress-lane-meta",
       text: "Shown as tables so they are easy to scan and sort mentally.",
     });
+    const questDetails = blockerSection.createEl("details", { cls: "pure-blocker-collapse" });
+    questDetails.open = true;
+    questDetails.createEl("summary", {
+      text: `Not Doable Quests (${filteredQuests.length})`,
+    });
+    this.renderQuestTable(questDetails, filteredQuests);
 
-    const tables = blockerSection.createDiv({ cls: "pure-blocker-tables" });
-    this.renderQuestTable(tables, filteredQuests);
-    this.renderDiaryTable(tables, filteredDiaries);
+    const diaryDetails = blockerSection.createEl("details", { cls: "pure-blocker-collapse" });
+    diaryDetails.open = true;
+    diaryDetails.createEl("summary", {
+      text: `Not Doable Achievement Diaries (${filteredDiaries.length})`,
+    });
+    this.renderDiaryTable(diaryDetails, filteredDiaries);
   }
 
   /**
@@ -679,6 +690,111 @@ class PureTrackerFlowView extends ItemView {
   }
 
   /**
+   * Renders a goal-only dependency flowchart.
+   *
+   * @param {any[]} goals
+   */
+  renderGoalDependencyMap(goals) {
+    const section = this.contentEl.createDiv({ cls: "pure-goal-flow-section" });
+    section.createEl("h3", { text: "Goal Dependency Map" });
+    section.createEl("p", {
+      cls: "pure-progress-lane-meta",
+      text: "Goal cards are linked by dependency goal IDs. Edit dependencies in a goal card modal.",
+    });
+
+    if (!goals || goals.length === 0) {
+      section.createEl("p", {
+        cls: "pure-flow-empty",
+        text: "No goals available for dependency mapping.",
+      });
+      return;
+    }
+
+    const viewport = section.createDiv({ cls: "pure-goal-flow-viewport" });
+    const canvas = viewport.createDiv({ cls: "pure-goal-flow-canvas" });
+    const width = 1400;
+    const laneGap = 350;
+    const nodeGap = 110;
+    const marginX = 40;
+    const marginY = 60;
+
+    const phaseOrder = this.getPhaseOrder(goals);
+    const grouped = this.groupGoalsByPhase(goals);
+    let maxLaneCount = 1;
+    for (const phase of phaseOrder) {
+      const laneItems = grouped.get(phase) || [];
+      if (laneItems.length > maxLaneCount) {
+        maxLaneCount = laneItems.length;
+      }
+    }
+    const height = Math.max(380, marginY * 2 + (maxLaneCount - 1) * nodeGap + 130);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "pure-goal-flow-links");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    canvas.appendChild(svg);
+
+    const goalMap = new Map();
+    for (const goal of goals) {
+      goalMap.set(this.goalIdKey(goal.goalId), goal);
+    }
+
+    const nodePositionByGoalId = new Map();
+
+    for (let laneIndex = 0; laneIndex < phaseOrder.length; laneIndex++) {
+      const phase = phaseOrder[laneIndex];
+      const laneItems = grouped.get(phase) || [];
+      const x = marginX + laneIndex * laneGap;
+
+      const laneLabel = canvas.createDiv({ cls: "pure-goal-flow-lane-label" });
+      laneLabel.setText(phase || "Unspecified Phase");
+      laneLabel.style.left = `${x}px`;
+      laneLabel.style.top = "12px";
+
+      for (let rowIndex = 0; rowIndex < laneItems.length; rowIndex++) {
+        const goal = laneItems[rowIndex];
+        const y = marginY + rowIndex * nodeGap;
+        const key = this.goalIdKey(goal.goalId);
+        nodePositionByGoalId.set(key, { x: x, y: y });
+        const card = this.createGoalCard(
+          canvas,
+          goal,
+          false,
+        );
+        card.addClass("pure-goal-flow-node");
+        card.style.left = `${x}px`;
+        card.style.top = `${y}px`;
+        goalMap.set(key, goal);
+      }
+    }
+
+    for (const goal of goals) {
+      const toKey = this.goalIdKey(goal.goalId);
+      const toPoint = nodePositionByGoalId.get(toKey);
+      if (!toPoint) {
+        continue;
+      }
+      const dependencies = this.getGoalDependencies(goal);
+      for (const dependencyGoalId of dependencies) {
+        const fromPoint = nodePositionByGoalId.get(this.goalIdKey(dependencyGoalId));
+        if (!fromPoint) {
+          continue;
+        }
+        this.drawGoalDependencyLink(
+          svg,
+          fromPoint.x + 260,
+          fromPoint.y + 40,
+          toPoint.x,
+          toPoint.y + 40,
+        );
+      }
+    }
+  }
+
+  /**
    * Creates one goal card in progression board.
    *
    * @param {HTMLElement} parent
@@ -716,6 +832,7 @@ class PureTrackerFlowView extends ItemView {
     card.addEventListener("click", () => {
       this.openGoalModal(goal);
     });
+    return card;
   }
 
   /**
@@ -739,6 +856,27 @@ class PureTrackerFlowView extends ItemView {
     modal.createEl("p", { text: `Category: ${goal.category || "-"}` });
     modal.createEl("p", { text: `Metric: ${goal.metric || "-"}` });
     modal.createEl("p", { text: `Status: ${this.formatStatus(goal.status)}` });
+    const dependencyLabel = modal.createEl("label", {
+      text: "Dependencies (goal IDs, comma-separated):",
+    });
+    dependencyLabel.addClass("pure-goal-modal-label");
+    const dependencyInput = modal.createEl("input", {
+      type: "text",
+      value: this.getGoalDependencies(goal).join(", "),
+      placeholder: "Example: 12.0, 24.0",
+    });
+    dependencyInput.addClass("pure-goal-modal-input");
+    const saveDependenciesButton = modal.createEl("button", { text: "Save Dependencies" });
+    saveDependenciesButton.addClass("pure-goal-modal-save");
+    saveDependenciesButton.addEventListener("click", async () => {
+      const dependencyIds = String(dependencyInput.value || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
+      await this.saveGoalDependencies(goal.goalId, dependencyIds);
+      this.closeGoalModal();
+      await this.renderGraph();
+    });
     modal.createEl("p", {
       cls: "pure-goal-modal-notes",
       text: `Notes: ${goal.notes || "No notes provided."}`,
@@ -763,6 +901,60 @@ class PureTrackerFlowView extends ItemView {
   }
 
   /**
+   * Extracts dependency IDs from goal object.
+   *
+   * @param {any} goal
+   * @returns {string[]}
+   */
+  getGoalDependencies(goal) {
+    const raw = goal && goal.dependencies;
+    if (Array.isArray(raw)) {
+      return raw
+        .map((value) => String(value || "").trim())
+        .filter((value) => value.length > 0);
+    }
+    if (typeof raw === "string") {
+      return raw
+        .split(",")
+        .map((value) => String(value || "").trim())
+        .filter((value) => value.length > 0);
+    }
+    return [];
+  }
+
+  /**
+   * Persists dependency IDs for one goal.
+   *
+   * @param {string} goalId
+   * @param {string[]} dependencyIds
+   * @returns {Promise<void>}
+   */
+  async saveGoalDependencies(goalId, dependencyIds) {
+    const payload = await this.plugin.readJson("goals.json", { source: "", items: [] });
+    const targetKey = this.goalIdKey(goalId);
+    let updated = false;
+    for (const item of payload.items || []) {
+      if (this.goalIdKey(item && item.goalId) !== targetKey) {
+        continue;
+      }
+      item.dependencies = dependencyIds.slice();
+      updated = true;
+      break;
+    }
+    if (!updated) {
+      new Notice(`Goal not found for dependency save: ${goalId || "unknown"}`);
+      return;
+    }
+    payload.updatedAt = nowIso();
+    await this.plugin.writeJson("goals.json", payload);
+    await this.plugin.syncGoalsMarkdown(payload.items || []);
+    await this.plugin.appendAudit(
+      `Updated dependencies for goal ${goalId || "unknown"} (${dependencyIds.length}).`,
+    );
+    new Notice("Goal dependencies saved.");
+  }
+
+  /**
    * @param {any[]} items
    * @returns {any[]}
    */
@@ -773,6 +965,36 @@ class PureTrackerFlowView extends ItemView {
     return items.filter(
       (item) => String(item && item.severity ? item.severity : "").toUpperCase() === this.viewState.severity,
     );
+  }
+
+  /**
+   * Draws curved link between dependency and dependent goals.
+   *
+   * @param {SVGElement} svg
+   * @param {number} x1
+   * @param {number} y1
+   * @param {number} x2
+   * @param {number} y2
+   */
+  drawGoalDependencyLink(svg, x1, y1, x2, y2) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const c1x = x1 + Math.max(30, (x2 - x1) * 0.35);
+    const c2x = x2 - Math.max(30, (x2 - x1) * 0.35);
+    path.setAttribute("d", `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`);
+    path.setAttribute("class", "pure-goal-flow-link");
+    svg.appendChild(path);
+  }
+
+  /**
+   * Normalizes goal ID to stable comparison key.
+   *
+   * @param {any} goalId
+   * @returns {string}
+   */
+  goalIdKey(goalId) {
+    return String(goalId || "")
+      .trim()
+      .toLowerCase();
   }
 
   /**
@@ -1521,6 +1743,28 @@ class PureTrackerPlugin extends Plugin {
   }
 
   /**
+   * Reads dependency IDs from goal payload item.
+   *
+   * @param {any} goal
+   * @returns {string[]}
+   */
+  getGoalDependencies(goal) {
+    const raw = goal && goal.dependencies;
+    if (Array.isArray(raw)) {
+      return raw
+        .map((value) => String(value || "").trim())
+        .filter((value) => value.length > 0);
+    }
+    if (typeof raw === "string") {
+      return raw
+        .split(",")
+        .map((value) => String(value || "").trim())
+        .filter((value) => value.length > 0);
+    }
+    return [];
+  }
+
+  /**
    * Extracts one markdown section body by heading title.
    *
    * @param {string} raw
@@ -1591,13 +1835,13 @@ class PureTrackerPlugin extends Plugin {
       "",
       "## Goals (goals.json)",
       "",
-      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes |",
-      "|---|---|---|---|---|---|---|",
+      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies |",
+      "|---|---|---|---|---|---|---|---|",
     ];
 
     for (const item of goals.items || []) {
       lines.push(
-        `| ${this.toTableCell(item.goalId)} | ${this.toTableCell(item.phase)} | ${this.toTableCell(item.category)} | ${this.toTableCell(item.goal)} | ${this.toTableCell(item.metric)} | ${this.toTableCell(item.status)} | ${this.toTableCell(item.notes)} |`,
+        `| ${this.toTableCell(item.goalId)} | ${this.toTableCell(item.phase)} | ${this.toTableCell(item.category)} | ${this.toTableCell(item.goal)} | ${this.toTableCell(item.metric)} | ${this.toTableCell(item.status)} | ${this.toTableCell(item.notes)} | ${this.toTableCell(this.getGoalDependencies(item).join(", "))} |`,
       );
     }
 
@@ -1664,6 +1908,10 @@ class PureTrackerPlugin extends Plugin {
       metric: cells[4] || "",
       status: cells[5] || "",
       notes: cells[6] || "",
+      dependencies: String(cells[7] || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
     }));
 
     const questItems = questRows.map((cells) => ({
@@ -1729,12 +1977,12 @@ class PureTrackerPlugin extends Plugin {
       "",
       "[[OSRS/Pure Tracker/README|Pure Tracker Index]]",
       "",
-      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes |",
-      "|---|---|---|---|---|---|---|",
+      "| Goal ID | Phase | Category | Goal | Metric | Status | Notes | Dependencies |",
+      "|---|---|---|---|---|---|---|---|",
     ];
     for (const goal of items) {
       lines.push(
-        `| ${goal.goalId || ""} | ${goal.phase || ""} | ${goal.category || ""} | ${goal.goal || ""} | ${goal.metric || ""} | ${goal.status || ""} | ${goal.notes || ""} |`,
+        `| ${goal.goalId || ""} | ${goal.phase || ""} | ${goal.category || ""} | ${goal.goal || ""} | ${goal.metric || ""} | ${goal.status || ""} | ${goal.notes || ""} | ${this.getGoalDependencies(goal).join(", ")} |`,
       );
     }
     lines.push("", "#pure-tracker #goals");
