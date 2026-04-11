@@ -176,3 +176,113 @@
   border-color: color-mix(in srgb, #7ba6ff 45%, var(--background-modifier-border) 55%);
 }
 
+.pure-flow-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.pure-flow-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pure-flow-control-group label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pure-flow-control-group select {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.pure-flow-control-button {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.pure-flow-workspace {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+}
+
+.pure-flow-viewport {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  overflow: auto;
+  background: radial-gradient(circle at 20% 20%, var(--background-secondary), var(--background-primary));
+  min-height: 640px;
+}
+
+.pure-flow-graph {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  position: relative;
+  overflow: visible;
+  background: transparent;
+}
+
+.pure-flow-details {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--background-secondary);
+  height: fit-content;
+  position: sticky;
+  top: 8px;
+}
+
+.pure-flow-details h3 {
+  margin: 0 0 10px;
+}
+
+.pure-flow-detail-row {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.pure-flow-detail-reason {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.pure-flow-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.pure-flow-link-dependency {
+  stroke: #6ccf8f;
+  stroke-dasharray: 6 5;
+}
+
+.pure-flow-node.is-selected {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.pure-flow-severity-blocked {
+  border-color: color-mix(in srgb, #ff6f6f 55%, var(--background-modifier-border) 45%);
+}
+
+.pure-flow-severity-risky {
+  border-color: color-mix(in srgb, #f7c16d 60%, var(--background-modifier-border) 40%);
+}
+

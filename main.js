@@ -378,6 +378,14 @@ class PureTrackerFlowView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
+    this.viewState = {
+      severity: "ALL",
+      questLimit: 10,
+      diaryLimit: 10,
+      zoomPercent: 100,
+      selectedKey: "",
+      selectedType: "",
+    };
   }
 
   /**
@@ -444,73 +452,162 @@ class PureTrackerFlowView extends ItemView {
     const diaries = await this.plugin.readJson("derived_not_completable_diaries.json", { items: [] });
 
     const goalItems = goals.items || [];
-    const questItems = (quests.items || []).slice(0, 6);
-    const diaryItems = (diaries.items || []).slice(0, 6);
-    const nextGoal = goalItems.find(
-      (goal) => this.normalizeStatus(goal && goal.status) !== "completed",
-    );
-
+    const nextGoal = goalItems.find((goal) => !this.isCompleted(goal && goal.status));
     const sourceLabel = nextGoal
       ? `${nextGoal.goalId || "?"} - ${nextGoal.goal || "Untitled goal"}`
       : "All goals complete";
+
+    const filteredQuests = this.filterBySeverity(quests.items || []).slice(0, this.viewState.questLimit);
+    const filteredDiaries = this.filterBySeverity(diaries.items || []).slice(0, this.viewState.diaryLimit);
 
     this.contentEl.empty();
 
     const header = this.contentEl.createDiv({ cls: "pure-flow-header" });
     header.createEl("h2", { text: "Pure Tracker Flow Dashboard" });
     header.createEl("p", {
-      text: "Graph-first view for next goal and key blockers. Auto-refreshes on JSON edits.",
+      text: "Interactive blocker map. Filter severity, zoom the board, and inspect item details.",
     });
+
+    const controls = this.contentEl.createDiv({ cls: "pure-flow-controls" });
+    this.addControlSelect(controls, "Severity", ["ALL", "BLOCKED", "RISKY"], this.viewState.severity, (value) => {
+      this.viewState.severity = value;
+      this.renderGraph();
+    });
+    this.addControlSelect(controls, "Quest Nodes", ["6", "10", "15", "20"], String(this.viewState.questLimit), (value) => {
+      this.viewState.questLimit = Number(value) || 10;
+      this.renderGraph();
+    });
+    this.addControlSelect(controls, "Diary Nodes", ["6", "10", "15", "20"], String(this.viewState.diaryLimit), (value) => {
+      this.viewState.diaryLimit = Number(value) || 10;
+      this.renderGraph();
+    });
+    this.addControlSelect(controls, "Zoom", ["80", "100", "125", "150"], String(this.viewState.zoomPercent), (value) => {
+      this.viewState.zoomPercent = Number(value) || 100;
+      this.renderGraph();
+    });
+    this.addControlButton(controls, "Refresh", () => this.renderGraph());
+    this.addControlButton(controls, "Open Data Sheets", () => this.plugin.openNote("OSRS/Pure Tracker/Data Sheets.md"));
+    this.addControlButton(controls, "Open Home", () => this.plugin.openNote("OSRS/Pure Tracker/Home.md"));
 
     const stats = this.contentEl.createDiv({ cls: "pure-flow-stats" });
     this.addStat(stats, "Goals", String(goalItems.length));
-    this.addStat(stats, "Quest Blockers", String(quests.items ? quests.items.length : 0));
-    this.addStat(stats, "Diary Blockers", String(diaries.items ? diaries.items.length : 0));
+    this.addStat(stats, "Quest Blockers", String(filteredQuests.length));
+    this.addStat(stats, "Diary Blockers", String(filteredDiaries.length));
+    this.addStat(stats, "Active Filter", this.viewState.severity);
 
-    const graph = this.contentEl.createDiv({ cls: "pure-flow-graph" });
-    const sourceNode = graph.createDiv({ cls: "pure-flow-node pure-flow-node-source" });
-    sourceNode.createEl("h4", { text: "Next Goal" });
-    sourceNode.createEl("p", { text: sourceLabel });
-    sourceNode.style.left = "40px";
-    sourceNode.style.top = "220px";
+    const workspace = this.contentEl.createDiv({ cls: "pure-flow-workspace" });
+    const graphViewport = workspace.createDiv({ cls: "pure-flow-viewport" });
+    const graph = graphViewport.createDiv({ cls: "pure-flow-graph" });
 
-    const questTitle = graph.createDiv({ cls: "pure-flow-column-label" });
-    questTitle.setText("Quest blockers");
-    questTitle.style.left = "400px";
-    questTitle.style.top = "12px";
+    const zoom = (this.viewState.zoomPercent || 100) / 100;
+    graph.style.transform = `scale(${zoom})`;
+    graph.style.transformOrigin = "top left";
 
-    const diaryTitle = graph.createDiv({ cls: "pure-flow-column-label" });
-    diaryTitle.setText("Diary blockers");
-    diaryTitle.style.left = "760px";
-    diaryTitle.style.top = "12px";
+    const graphWidth = 1500;
+    const graphHeight = Math.max(760, 130 + Math.max(filteredQuests.length, filteredDiaries.length) * 100);
+    graph.style.width = `${graphWidth}px`;
+    graph.style.height = `${graphHeight}px`;
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("class", "pure-flow-links");
+    svg.setAttribute("viewBox", `0 0 ${graphWidth} ${graphHeight}`);
+    svg.setAttribute("preserveAspectRatio", "none");
     graph.appendChild(svg);
 
-    const sourceX = 300;
-    const sourceY = 265;
+    const sourcePoint = { x: 330, y: graphHeight / 2 };
+    const sourceNode = this.createFlowNode(
+      graph,
+      "source",
+      "Next Goal",
+      sourceLabel,
+      "ACTIONABLE",
+      "",
+      40,
+      sourcePoint.y - 60,
+      "source-next-goal",
+    );
+    sourceNode.classList.add("pure-flow-node-source");
 
-    for (let index = 0; index < questItems.length; index++) {
-      const item = questItems[index];
-      const y = 70 + index * 85;
-      const node = graph.createDiv({ cls: "pure-flow-node pure-flow-node-quest" });
-      node.createEl("h4", { text: item.quest || "Unknown quest" });
-      node.createEl("p", { text: `${item.severity || "UNKNOWN"} - ${item.reasonCode || "UNKNOWN"}` });
-      node.style.left = "400px";
-      node.style.top = `${y}px`;
-      this.drawLink(svg, sourceX, sourceY, 400, y + 30, "quest");
+    const questTitle = graph.createDiv({ cls: "pure-flow-column-label" });
+    questTitle.setText("Quest blockers");
+    questTitle.style.left = "470px";
+    questTitle.style.top = "16px";
+
+    const diaryTitle = graph.createDiv({ cls: "pure-flow-column-label" });
+    diaryTitle.setText("Diary blockers");
+    diaryTitle.style.left = "940px";
+    diaryTitle.style.top = "16px";
+
+    const questCenters = new Map();
+    const diaryCenters = new Map();
+
+    for (let index = 0; index < filteredQuests.length; index++) {
+      const item = filteredQuests[index];
+      const y = 70 + index * 100;
+      const key = `quest:${item.ruleId || item.quest || index}`;
+      this.createFlowNode(
+        graph,
+        "quest",
+        item.quest || "Unknown quest",
+        item.riskReason || "No reason provided",
+        item.severity || "UNKNOWN",
+        item.reasonCode || "UNKNOWN",
+        470,
+        y,
+        key,
+      );
+      questCenters.set(this.normalizeName(item.quest || ""), { x: 470, y: y + 58 });
+      this.drawLink(svg, sourcePoint.x, sourcePoint.y, 470, y + 58, "quest");
     }
 
-    for (let index = 0; index < diaryItems.length; index++) {
-      const item = diaryItems[index];
-      const y = 70 + index * 85;
-      const node = graph.createDiv({ cls: "pure-flow-node pure-flow-node-diary" });
-      node.createEl("h4", { text: `${item.diary || "Unknown diary"} (${item.tier || "?"})` });
-      node.createEl("p", { text: `${item.blockedBy || "No prerequisite"} - ${item.reasonCode || "UNKNOWN"}` });
-      node.style.left = "760px";
-      node.style.top = `${y}px`;
-      this.drawLink(svg, sourceX, sourceY, 760, y + 30, "diary");
+    for (let index = 0; index < filteredDiaries.length; index++) {
+      const item = filteredDiaries[index];
+      const y = 70 + index * 100;
+      const key = `diary:${item.ruleId || item.diary || index}`;
+      this.createFlowNode(
+        graph,
+        "diary",
+        `${item.diary || "Unknown diary"} (${item.tier || "?"})`,
+        item.riskReason || "No reason provided",
+        item.severity || "BLOCKED",
+        item.reasonCode || "UNKNOWN",
+        940,
+        y,
+        key,
+      );
+      diaryCenters.set(key, { x: 940, y: y + 58 });
+      this.drawLink(svg, sourcePoint.x, sourcePoint.y, 940, y + 58, "diary");
+    }
+
+    for (const diary of filteredDiaries) {
+      if (!diary || !diary.blockedBy) {
+        continue;
+      }
+      const questPoint = questCenters.get(this.normalizeName(diary.blockedBy));
+      const diaryPoint = diaryCenters.get(`diary:${diary.ruleId || diary.diary || ""}`);
+      if (!questPoint || !diaryPoint) {
+        continue;
+      }
+      this.drawLink(svg, diaryPoint.x, diaryPoint.y, questPoint.x, questPoint.y, "dependency");
+    }
+
+    const details = workspace.createDiv({ cls: "pure-flow-details" });
+    details.createEl("h3", { text: "Selection" });
+    const selected = this.resolveSelection(filteredQuests, filteredDiaries, nextGoal);
+    if (!selected) {
+      details.createEl("p", {
+        cls: "pure-flow-empty",
+        text: "Select a node to inspect full reason details.",
+      });
+    } else {
+      details.createDiv({ cls: "pure-flow-detail-row", text: `Type: ${selected.type}` });
+      details.createDiv({ cls: "pure-flow-detail-row", text: `Title: ${selected.title}` });
+      details.createDiv({ cls: "pure-flow-detail-row", text: `Severity: ${selected.severity || "-"}` });
+      details.createDiv({ cls: "pure-flow-detail-row", text: `Reason code: ${selected.reasonCode || "-"}` });
+      details.createEl("p", {
+        cls: "pure-flow-detail-reason",
+        text: selected.reason || "No reason details available.",
+      });
     }
   }
 
@@ -523,6 +620,80 @@ class PureTrackerFlowView extends ItemView {
     const card = container.createDiv({ cls: "pure-flow-stat" });
     card.createEl("span", { cls: "pure-flow-stat-label", text: label });
     card.createEl("strong", { cls: "pure-flow-stat-value", text: value });
+  }
+
+  /**
+   * Creates a dashboard control button.
+   *
+   * @param {HTMLElement} container
+   * @param {string} label
+   * @param {() => void | Promise<void>} onClick
+   */
+  addControlButton(container, label, onClick) {
+    const button = container.createEl("button", { text: label });
+    button.addClass("pure-flow-control-button");
+    button.addEventListener("click", async () => {
+      await onClick();
+    });
+  }
+
+  /**
+   * Creates a dashboard select control.
+   *
+   * @param {HTMLElement} container
+   * @param {string} label
+   * @param {string[]} options
+   * @param {string} currentValue
+   * @param {(value: string) => void} onChange
+   */
+  addControlSelect(container, label, options, currentValue, onChange) {
+    const wrap = container.createDiv({ cls: "pure-flow-control-group" });
+    wrap.createEl("label", { text: label });
+    const select = wrap.createEl("select");
+    for (const option of options) {
+      const optionEl = select.createEl("option", { text: option, value: option });
+      optionEl.value = option;
+      if (option === currentValue) {
+        optionEl.selected = true;
+      }
+    }
+    select.addEventListener("change", () => {
+      onChange(select.value);
+    });
+  }
+
+  /**
+   * Creates one clickable node card.
+   *
+   * @param {HTMLElement} graph
+   * @param {string} type
+   * @param {string} title
+   * @param {string} reason
+   * @param {string} severity
+   * @param {string} reasonCode
+   * @param {number} x
+   * @param {number} y
+   * @param {string} key
+   * @returns {HTMLElement}
+   */
+  createFlowNode(graph, type, title, reason, severity, reasonCode, x, y, key) {
+    const node = graph.createDiv({
+      cls: `pure-flow-node pure-flow-node-${type} pure-flow-severity-${String(severity || "").toLowerCase()}`,
+    });
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.createEl("h4", { text: title || "Untitled node" });
+    node.createEl("p", { text: reasonCode ? `${severity} - ${reasonCode}` : severity || "UNKNOWN" });
+    node.createEl("p", { text: reason || "" });
+    if (this.viewState.selectedKey === key) {
+      node.addClass("is-selected");
+    }
+    node.addEventListener("click", () => {
+      this.viewState.selectedKey = key;
+      this.viewState.selectedType = type;
+      this.renderGraph();
+    });
+    return node;
   }
 
   /**
@@ -542,6 +713,101 @@ class PureTrackerFlowView extends ItemView {
     path.setAttribute("d", `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`);
     path.setAttribute("class", `pure-flow-link pure-flow-link-${type}`);
     svg.appendChild(path);
+  }
+
+  /**
+   * @param {any[]} items
+   * @returns {any[]}
+   */
+  filterBySeverity(items) {
+    if (this.viewState.severity === "ALL") {
+      return items;
+    }
+    return items.filter(
+      (item) => String(item && item.severity ? item.severity : "").toUpperCase() === this.viewState.severity,
+    );
+  }
+
+  /**
+   * Resolves selected node details for sidebar rendering.
+   *
+   * @param {any[]} quests
+   * @param {any[]} diaries
+   * @param {any} nextGoal
+   * @returns {any}
+   */
+  resolveSelection(quests, diaries, nextGoal) {
+    if (!this.viewState.selectedKey) {
+      if (!nextGoal) {
+        return null;
+      }
+      return {
+        type: "Goal",
+        title: nextGoal.goal || "All goals complete",
+        severity: "ACTIONABLE",
+        reasonCode: "NEXT_GOAL",
+        reason: nextGoal.notes || "Next unfinished goal based on goal list ordering.",
+      };
+    }
+    if (this.viewState.selectedKey === "source-next-goal") {
+      return {
+        type: "Goal",
+        title: nextGoal ? nextGoal.goal || "Untitled goal" : "All goals complete",
+        severity: "ACTIONABLE",
+        reasonCode: "NEXT_GOAL",
+        reason: nextGoal ? nextGoal.notes || "No notes." : "No unfinished goals were found.",
+      };
+    }
+
+    for (const quest of quests) {
+      const key = `quest:${quest.ruleId || quest.quest || ""}`;
+      if (key === this.viewState.selectedKey) {
+        return {
+          type: "Quest",
+          title: quest.quest || "Unknown quest",
+          severity: quest.severity || "UNKNOWN",
+          reasonCode: quest.reasonCode || "UNKNOWN",
+          reason: quest.riskReason || "No reason provided.",
+        };
+      }
+    }
+
+    for (const diary of diaries) {
+      const key = `diary:${diary.ruleId || diary.diary || ""}`;
+      if (key === this.viewState.selectedKey) {
+        return {
+          type: "Diary",
+          title: `${diary.diary || "Unknown diary"} (${diary.tier || "?"})`,
+          severity: diary.severity || "UNKNOWN",
+          reasonCode: diary.reasonCode || "UNKNOWN",
+          reason: diary.riskReason || "No reason provided.",
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * @param {string} name
+   * @returns {string}
+   */
+  normalizeName(name) {
+    return String(name || "")
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9 ]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /**
+   * @param {string} raw
+   * @returns {boolean}
+   */
+  isCompleted(raw) {
+    const status = this.normalizeStatus(raw);
+    return ["completed", "complete", "done"].indexOf(status) >= 0;
   }
 
   /**
