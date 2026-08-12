@@ -1,0 +1,17 @@
+# Normalize line endings to LF in the repo AND working tree, overriding a local
+# core.autocrlf=true. Keeps Windows checkouts from showing every file as modified.
+* text=auto eol=lf
+
+# Gradle wrapper: script must stay LF, batch file must stay CRLF.
+gradlew        text eol=lf
+# gradlew.bat is a generated wrapper stored CRLF upstream; never normalize it.
+*.bat          -text
+gradle-wrapper.jar binary
+
+# Binary assets: never normalize or diff their bytes.
+*.jar   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
